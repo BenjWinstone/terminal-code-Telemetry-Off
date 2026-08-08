@@ -31,10 +31,17 @@ export default function Home() {
 
         {/* the demo runs wider than the text column */}
         <VideoPlayer
-          src="/demo.mp4"
-          poster="/demo-poster.webp"
-          ratio="4 / 3"
-          durationHint={7.77}
+          dark={{
+            src: "/demo-dark.mp4",
+            poster: "/demo-dark-poster.webp",
+            durationHint: 7.07,
+          }}
+          light={{
+            src: "/demo-light.mp4",
+            poster: "/demo-light-poster.webp",
+            durationHint: 8.23,
+          }}
+          ratio="1600 / 1076"
         />
 
         <div className="grid gap-6 pt-12 sm:grid-cols-[64px_1fr] sm:gap-8 sm:pt-14">

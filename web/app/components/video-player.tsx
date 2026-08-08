@@ -1,10 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /* The video is fetched only once someone presses play — preload="none" plus a
-   poster means the page costs one 72KB still until then. The aspect ratio is
-   declared up front so the frame reserves its space and nothing shifts. */
+   poster means the page costs one small still until then. The aspect ratio is
+   declared up front so the frame reserves its space and nothing shifts.
+
+   There are two captures, one per theme. A <source media> attribute would be
+   the tidy way to pick between them, but browsers dropped media matching on
+   video sources, so the choice is made here instead. */
 
 function fmt(s: number) {
   if (!Number.isFinite(s)) return "0:00";
@@ -13,23 +17,53 @@ function fmt(s: number) {
   return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
-export default function VideoPlayer({
-  src,
-  poster,
-  ratio = "4 / 3",
-  durationHint = 0,
-}: {
+export interface Capture {
   src: string;
   poster: string;
-  ratio?: string;
-  /* stands in until metadata arrives, which with preload="none" is not until
-     the first play */
   durationHint?: number;
+}
+
+export default function VideoPlayer({
+  dark,
+  light,
+  ratio = "4 / 3",
+}: {
+  dark: Capture;
+  /* the server has no way to know the visitor's theme, so it renders the dark
+     capture — the site's default — and the light one swaps in on mount */
+  light: Capture;
+  ratio?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isLight, setIsLight] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(durationHint);
+
+  const capture = isLight ? light : dark;
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => setIsLight(query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+
+  /* Position and duration are stamped with the clip they belong to, so a theme
+     flip falls back to the new clip's own values without an effect to reset
+     them. Swapping does restart the demo — the two captures are separate
+     recordings of different lengths, so the same timestamp is a different
+     moment anyway, and restarting is at least predictable. */
+  const [track, setTrack] = useState({
+    src: capture.src,
+    duration: capture.durationHint ?? 0,
+    time: 0,
+  });
+  const current =
+    track.src === capture.src
+      ? track
+      : { src: capture.src, duration: capture.durationHint ?? 0, time: 0 };
+  const { duration, time } = current;
+  const setTime = (t: number) => setTrack({ ...current, time: t });
 
   function toggle() {
     const v = videoRef.current;
@@ -83,8 +117,9 @@ export default function VideoPlayer({
       <div className="relative">
         <video
           ref={videoRef}
-          src={src}
-          poster={poster}
+          key={capture.src}
+          src={capture.src}
+          poster={capture.poster}
           preload="none"
           playsInline
           muted
@@ -95,7 +130,9 @@ export default function VideoPlayer({
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
           onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+          onLoadedMetadata={(e) =>
+            setTrack({ ...current, duration: e.currentTarget.duration })
+          }
         />
 
         {!playing && (
