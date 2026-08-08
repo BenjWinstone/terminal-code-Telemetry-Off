@@ -112,7 +112,12 @@ export default function VideoPlayer({
     <figure
       onKeyDown={onKeyDown}
       tabIndex={0}
-      className="overflow-hidden rounded-[6px] border border-border bg-panel focus:outline-none focus-visible:border-text2"
+      /* No frame of our own. The capture already has the editor window's
+         rounded corners and outline, and it was recorded on a backdrop that
+         matches the page (#f9f9f9 / #0c0c0c against #fbfbfa / #0c0c0d), so the
+         window reads as the frame. Wrapping it in a second rounded border just
+         nested one corner radius inside another. */
+      className="focus:outline-none"
     >
       <div className="relative">
         <video
@@ -152,7 +157,7 @@ export default function VideoPlayer({
         )}
       </div>
 
-      <figcaption className="flex h-[38px] items-center gap-3 border-t border-border-soft bg-panel2 px-3">
+      <figcaption className="flex h-[38px] items-center gap-3 pt-1">
         <button
           type="button"
           onClick={toggle}
