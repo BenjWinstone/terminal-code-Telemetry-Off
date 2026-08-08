@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { BROWSER_HOME, RUNTIME_DIR } from "./paths";
+import { BROWSER_HOME, RUNTIME_DIR, VENDOR_DIR } from "./paths";
 
 /** The terminal-browser build tode is written against. tode drives flags whose
  * behaviour is specific to this build, so it pins rather than taking whatever
@@ -26,7 +26,11 @@ export interface Release {
   size: number;
 }
 
-export type Source = "override" | "pinned" | "cloned" | "downloaded";
+export type Source = "override" | "vendored" | "pinned" | "cloned" | "downloaded";
+
+/** The copy that ships inside the release. A normal install always resolves
+ * here, so the first run costs no download and needs no network. */
+const VENDORED = path.join(VENDOR_DIR, "terminal-browser");
 
 export interface Runtime {
   bin: string;
@@ -192,6 +196,12 @@ export async function resolveRuntime(options: ResolveOptions = {}): Promise<Runt
     if (!fs.existsSync(override)) throw new Error(`TODE_TERMINAL_BROWSER_BIN is not there: ${override}`);
     const root = path.resolve(path.dirname(override), "..");
     return { bin: override, root, version: versionAt(root) ?? "override", source: "override" };
+  }
+
+  // the vendored copy is checked first, and only for the version tode pins:
+  // asking for another version has to go and get that one
+  if (version === PINNED_VERSION && usable(VENDORED, version)) {
+    return { bin: writeLauncher(VENDORED), root: VENDORED, version, source: "vendored" };
   }
 
   const root = rootFor(version);

@@ -1,0 +1,19 @@
+name = "tode-releases"
+main = "src/index.ts"
+compatibility_date = "2026-08-08"
+workers_dev = true
+
+# The marketing site on Vercel owns the rest of the domain, so the worker only
+# claims /install and everything nested under it.
+# routes enabled once tode.sh is a Cloudflare zone
+# routes = [
+#   { pattern = "tode.sh/install", zone_name = "tode.sh" },
+#   { pattern = "tode.sh/install/*", zone_name = "tode.sh" },
+# ]
+
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "tode-releases"
+
+[observability]
+enabled = true

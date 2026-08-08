@@ -13,21 +13,27 @@ import {
   stopServer,
 } from "./codeserver/server";
 import { installBridge } from "./bridge";
+import { doctorCommand } from "./doctor";
 import { importCommand } from "./import/command";
 import { parseGoto, runningWindow, sendToWindow } from "./ipc";
 import type { OpenFile } from "./ipc";
 import { EXTENSIONS_DIR, VSCODE_DIR, registerThemeExtension } from "./profile";
 import {
+  LIVE_COLORS_FILE,
+  cachePalette,
   ensureFont,
   installCss,
   installKeybindings,
+  installLiveSettings,
   installSettings,
   installTheme,
   readPalette,
 } from "./profile";
+import { watchLiveColors } from "./livesync";
 import { PINNED_VERSION, resolveRuntime, supportedFlags } from "./runtime/release";
 import { BROWSER_HOME } from "./runtime/paths";
 import { resolveTarget, workbenchUrl } from "./target";
+import { upgrade } from "./upgrade";
 import { hex } from "./theme/color";
 import { semanticColors } from "./theme/generate";
 
@@ -107,6 +113,7 @@ Commands:
   theme                 Show the colours this terminal reports, and rebuild
   runtime               Which terminal-browser build is in use, and why
   daemon status|stop    The code-server that stays warm between opens
+  upgrade [--check]     Install the newest build on this channel
   shutdown              Stop everything tode is running
 `;
 
@@ -235,6 +242,7 @@ async function openCommand(args: string[]): Promise<number> {
   installCss(palette);
   installSettings();
   installKeybindings();
+  installLiveSettings(palette);
   done("profile");
   const server = await ensureServer();
   done("code-server");
@@ -247,6 +255,9 @@ async function openCommand(args: string[]): Promise<number> {
   // a sign in flow would otherwise navigate the pane onto github and strand it
   // there, with no toolbar to come back with
   if (flags.has("--external-links")) argv.push("--external-links");
+  // lets a genuine terminal theme change reach this window without a reload,
+  // once terminal-browser knows how to report one
+  if (flags.has("--colors-file")) argv.push(`--colors-file=${LIVE_COLORS_FILE}`);
   if (split) argv.push("--split", split);
   if (size) argv.push("--size", size);
 
@@ -258,9 +269,22 @@ async function openCommand(args: string[]): Promise<number> {
     fs.writeFileSync(`${CSS_FILE}.launch.json`, JSON.stringify({ spawnedAt: Date.now(), stages }));
   } catch {}
   const child = spawn(runtime.bin, ["open", ...argv], { stdio: "inherit" });
+
+  const stopWatching = flags.has("--colors-file")
+    ? watchLiveColors(LIVE_COLORS_FILE, palette, (live) => {
+        installTheme(live);
+        installCss(live);
+        installLiveSettings(live);
+        cachePalette(live);
+      })
+    : () => {};
+
   return new Promise<number>((resolve) => {
     child.on("error", (error) => fail(`could not start terminal-browser: ${error.message}`));
-    child.on("exit", (code) => resolve(code ?? 0));
+    child.on("exit", (code) => {
+      stopWatching();
+      resolve(code ?? 0);
+    });
   });
 }
 
@@ -327,6 +351,7 @@ async function runtimeCommand(): Promise<number> {
   const runtime = await progressRuntime();
   const why = {
     override: "TODE_TERMINAL_BROWSER_BIN points at it",
+    vendored: "shipped inside this install",
     pinned: "already fetched for this pin",
     cloned: "cloned from the install already on this machine",
     downloaded: "downloaded for this pin",
@@ -443,6 +468,43 @@ async function shutdownCommand(): Promise<number> {
   return 0;
 }
 
+async function upgradeCommand(args: string[]): Promise<number> {
+  const check = takeBool(args, "--check");
+  const version = takeFlag(args, "--version");
+  let announced = false;
+  const outcome = await upgrade({
+    check,
+    version,
+    onStage: (stage, fraction) => {
+      if (stage !== "downloading") return;
+      if (!announced) {
+        process.stderr.write("tode: downloading\n");
+        announced = true;
+      }
+      const percent = Math.round(fraction * 100);
+      process.stderr.write(`\r  ${percent}%${percent === 100 ? "\n" : ""}`);
+    },
+  });
+
+  switch (outcome.kind) {
+    case "not-an-install":
+      // a checkout has no VERSION file, and overwriting one would throw away work
+      fail(`${outcome.root} is a working tree, not an install — use git pull`);
+    // eslint-disable-next-line no-fallthrough
+    case "current":
+      process.stdout.write(`tode ${outcome.version} is the newest on ${outcome.channel}\n`);
+      return 0;
+    case "available":
+      process.stdout.write(`tode ${outcome.build.version} is available (you have ${outcome.from})\n`);
+      return 0;
+    case "upgraded":
+      // the old code-server is still serving the tree that just moved
+      stopServer();
+      process.stdout.write(`tode ${outcome.from} -> ${outcome.build.version}\n`);
+      return 0;
+  }
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   if (args[0] === "--version" || args[0] === "-v") {
@@ -453,12 +515,14 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
+  if (args[0] === "doctor") return doctorCommand(args.slice(1));
   if (args[0] === "import") return importCommand(args.slice(1));
   if (args[0] === "theme") return themeCommand();
   if (args[0] === "runtime") return runtimeCommand();
   if (args[0] === "daemon") return daemonCommand(args[1]);
   if (args[0] === "timing") return timingCommand();
   if (args[0] === "quit") return quitCommand();
+  if (args[0] === "upgrade") return upgradeCommand(args.slice(1));
   if (args[0] === "shutdown") return shutdownCommand();
   return openCommand(args);
 }
