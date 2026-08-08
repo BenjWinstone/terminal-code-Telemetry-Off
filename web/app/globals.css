@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  /* warm graphite rather than neutral black — closer to a terminal at night */
+  --bg: #0c0c0d;
+  --panel: #121214;
+  --panel2: #17171a;
+  --border: #26262a;
+  --border-soft: #1e1e21;
+  --text: #ededf0;
+  --text2: #b8b8c0;
+  --muted: #82828c;
+  --faint: #5a5a63;
+  --ok: #6fbf8b;
+  --line: rgba(255, 255, 255, 0.055);
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #fbfbfa;
+    --panel: #f4f4f2;
+    --panel2: #eeeeec;
+    --border: #dedeDA;
+    --border-soft: #e8e8e4;
+    --text: #17171a;
+    --text2: #45454c;
+    --muted: #74747d;
+    --faint: #9a9aa2;
+    --ok: #2f8f5b;
+    --line: rgba(0, 0, 0, 0.07);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-text: var(--text);
+  --color-text2: var(--text2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-ok: var(--ok);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-mono-face);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    sans-serif;
+  font-size: 14px;
+  line-height: 22px;
+  overflow-x: hidden;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--font-mono-face), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+}
+
+::selection {
+  background: var(--text);
+  color: var(--bg);
+}
+
+/* a rule that runs the full width of the viewport, not just the column */
+.rule {
+  position: relative;
+}
+.rule::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 100vw;
+  height: 1px;
+  margin-left: -50vw;
+  background: var(--line);
+}
+
+/* a block caret sitting after the word, the way a terminal leaves one */
+.caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  /* the l has almost no right sidebearing, so the block reads as touching it
+     without this — roughly the cell gap a terminal would leave */
+  margin-left: 0.19em;
+  vertical-align: -0.16em;
+  background: currentColor;
+  animation: caret-blink 1.06s steps(1) infinite;
+}
+@keyframes caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
+
+/* the hero's key word, set as inline code inside sans copy */
+.keyword {
+  font-family: var(--font-mono-face), ui-monospace, monospace;
+  font-size: 0.9em;
+  letter-spacing: -0.01em;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel2);
+  white-space: nowrap;
+}
+
+

@@ -1,0 +1,493 @@
+const assert = require("node:assert/strict");
+const { test } = require("node:test");
+
+const { parseColor, parseReplies, withFallbacks } = require("../dist/terminal/osc.js");
+const { contrast, hex, isDark, parseHex } = require("../dist/theme/color.js");
+const { generateTheme, semanticColors, paletteFingerprint } = require("../dist/theme/generate.js");
+const { setKey, setKeys, readKey } = require("../dist/jsonc.js");
+
+test("colour replies are scaled from whatever width the terminal used", () => {
+  assert.deepEqual(parseColor("rgb:0000/0000/0000"), [0, 0, 0]);
+  assert.deepEqual(parseColor("rgb:ffff/ffff/ffff"), [255, 255, 255]);
+  assert.deepEqual(parseColor("rgb:ff/80/00"), [255, 128, 0]);
+  assert.deepEqual(parseColor("rgb:ffff/8080/0000"), [255, 128, 0]);
+  assert.equal(parseColor("nonsense"), null);
+});
+
+test("a full reply stream is unpicked into background, foreground and ansi", () => {
+  const raw =
+    "\x1b]11;rgb:0000/0000/0000\x07" +
+    "\x1b]10;rgb:c8c8/cdcd/d7d7\x1b\\" +
+    "\x1b]4;0;rgb:1a1a/1b1b/1e1e\x07" +
+    "\x1b]4;9;rgb:ffff/6c6c/7070\x07" +
+    "\x1b[?62;c";
+  const parsed = parseReplies(raw);
+  assert.deepEqual(parsed.background, [0, 0, 0]);
+  assert.deepEqual(parsed.foreground, [200, 205, 215]);
+  assert.deepEqual(parsed.ansi[0], [26, 27, 30]);
+  assert.deepEqual(parsed.ansi[9], [255, 108, 112]);
+  assert.equal(parsed.ansi[5], null);
+});
+
+test("slots the terminal did not answer fall back without losing the ones it did", () => {
+  const palette = withFallbacks({ background: [0, 0, 0], foreground: null, ansi: new Array(16).fill(null) });
+  assert.deepEqual(palette.background, [0, 0, 0]);
+  assert.equal(palette.ansi.length, 16);
+  assert.ok(palette.foreground);
+});
+
+/** a pure black terminal, which is what a default ghostty install looks like */
+const BLACK = withFallbacks({
+  background: [0, 0, 0],
+  foreground: [255, 255, 255],
+  ansi: [
+    [0, 0, 0], [204, 62, 68], [56, 163, 91], [191, 141, 47],
+    [58, 109, 199], [163, 85, 194], [50, 158, 168], [187, 187, 187],
+    [85, 85, 85], [255, 96, 100], [96, 214, 122], [246, 199, 88],
+    [88, 154, 255], [214, 130, 245], [96, 214, 214], [255, 255, 255],
+  ],
+});
+
+test("a black terminal produces a dark theme whose editor is that same black", () => {
+  const theme = generateTheme(BLACK);
+  assert.equal(theme.type, "dark");
+  assert.equal(theme.colors["editor.background"], "#000000");
+  assert.equal(theme.colors["terminal.background"], "#000000");
+});
+
+test("a light terminal produces a light theme", () => {
+  const light = withFallbacks({
+    background: [255, 255, 255],
+    foreground: [30, 30, 30],
+    ansi: BLACK.ansi,
+  });
+  assert.equal(generateTheme(light).type, "light");
+  assert.equal(isDark(parseHex("#ffffff")), false);
+});
+
+test("a pure black terminal still gets separated panels", () => {
+  const theme = generateTheme(BLACK);
+  const distinct = (a, b) => assert.notEqual(theme.colors[a], theme.colors[b], `${a} matches ${b}`);
+  distinct("sideBar.background", "editor.background");
+  distinct("activityBar.background", "editor.background");
+  distinct("editorWidget.background", "editor.background");
+  distinct("editorWidget.background", "sideBar.background");
+  distinct("editor.lineHighlightBackground", "editor.background");
+  distinct("tab.activeBackground", "tab.inactiveBackground");
+});
+
+test("a pure white terminal separates the other way", () => {
+  const white = withFallbacks({ background: [255, 255, 255], foreground: [0, 0, 0], ansi: BLACK.ansi });
+  const theme = generateTheme(white);
+  assert.equal(theme.colors["editor.background"], "#ffffff");
+  assert.notEqual(theme.colors["sideBar.background"], "#ffffff");
+  assert.notEqual(theme.colors["editorWidget.background"], theme.colors["sideBar.background"]);
+});
+
+test("the ansi palette is carried across verbatim", () => {
+  const theme = generateTheme(BLACK);
+  assert.equal(theme.colors["terminal.ansiRed"], hex(BLACK.ansi[1]));
+  assert.equal(theme.colors["terminal.ansiBrightBlue"], hex(BLACK.ansi[12]));
+  assert.equal(theme.colors["terminal.ansiBlack"], hex(BLACK.ansi[0]));
+});
+
+test("accents are picked by hue, not by slot number", () => {
+  const shuffled = withFallbacks({
+    background: [0, 0, 0],
+    foreground: [255, 255, 255],
+    // green sits where red usually does and the other way round
+    ansi: BLACK.ansi.map((c, i) => (i === 9 ? BLACK.ansi[10] : i === 10 ? BLACK.ansi[9] : c)),
+  });
+  const accent = semanticColors(shuffled);
+  assert.equal(hex(accent.red), hex(BLACK.ansi[9]), "red should still be the red one");
+  assert.equal(hex(accent.green), hex(BLACK.ansi[10]), "green should still be the green one");
+});
+
+test("every text colour clears WCAG AA against the editor surface", () => {
+  for (const palette of [BLACK, withFallbacks(null)]) {
+    const theme = generateTheme(palette);
+    const bg = parseHex(theme.colors["editor.background"]);
+    const opaque = (value) => /^#[0-9a-f]{6}$/i.test(value);
+    for (const token of theme.tokenColors) {
+      const fg = token.settings.foreground;
+      if (!fg || !opaque(fg)) continue;
+      const ratio = contrast(parseHex(fg), bg);
+      assert.ok(ratio >= 2.9, `${token.scope} only reaches ${ratio.toFixed(2)}:1`);
+    }
+  }
+});
+
+test("a hopeless low contrast palette is still pushed to something readable", () => {
+  const murky = withFallbacks({
+    background: [20, 20, 20],
+    foreground: [40, 40, 40],
+    ansi: new Array(16).fill([28, 28, 30]),
+  });
+  const theme = generateTheme(murky);
+  const bg = parseHex(theme.colors["editor.background"]);
+  const fg = parseHex(theme.colors["editor.foreground"]);
+  assert.equal(hex(bg), "#141414");
+  for (const token of theme.tokenColors) {
+    const colour = token.settings.foreground;
+    if (!colour || !/^#[0-9a-f]{6}$/i.test(colour)) continue;
+    assert.ok(contrast(parseHex(colour), bg) >= 2.9, `${token.scope} stayed muddy`);
+  }
+});
+
+test("the fingerprint follows the palette", () => {
+  const other = withFallbacks({ background: [1, 0, 0], foreground: [255, 255, 255], ansi: BLACK.ansi });
+  assert.equal(paletteFingerprint(BLACK), paletteFingerprint(BLACK));
+  assert.notEqual(paletteFingerprint(BLACK), paletteFingerprint(other));
+});
+
+test("settings edits keep the comments and the keys around them", () => {
+  const before = `{
+  // a note the user wrote
+  "editor.tabSize": 4,
+  "files.autoSave": "off"
+}`;
+  const after = setKeys(before, { "workbench.colorTheme": "Tode Terminal", "editor.tabSize": 2 });
+  assert.match(after, /\/\/ a note the user wrote/);
+  assert.equal(readKey(after, "editor.tabSize"), 2);
+  assert.equal(readKey(after, "files.autoSave"), "off");
+  assert.equal(readKey(after, "workbench.colorTheme"), "Tode Terminal");
+});
+
+test("settings can be written into an empty or absent file", () => {
+  assert.equal(readKey(setKey("", "a", 1), "a"), 1);
+  assert.equal(readKey(setKey("{}", "a", 1), "a"), 1);
+  assert.equal(readKey(setKey("{\n}\n", "a", "x"), "a"), "x");
+});
+
+test("writing settings twice is stable", () => {
+  const once = setKeys("{}", { "workbench.colorTheme": "Tode Terminal", "editor.fontSize": 13 });
+  const twice = setKeys(once, { "workbench.colorTheme": "Tode Terminal", "editor.fontSize": 13 });
+  assert.equal(once, twice);
+});
+
+test("jsonc reading survives comments and trailing commas", () => {
+  const { parseJsonc } = require("../dist/jsonc.js");
+  const source = `{
+  // a line comment
+  "a": 1, /* block */
+  "url": "https://example.com/not-a-comment",
+  "nested": { "b": [1, 2,] },
+}`;
+  assert.deepEqual(parseJsonc(source), {
+    a: 1,
+    url: "https://example.com/not-a-comment",
+    nested: { b: [1, 2] },
+  });
+});
+
+test("jsonc reading handles a keybindings array", () => {
+  const { parseJsonc } = require("../dist/jsonc.js");
+  const parsed = parseJsonc(`// mine\n[ { "key": "cmd+k", "command": "x" }, ]`);
+  assert.deepEqual(parsed, [{ key: "cmd+k", command: "x" }]);
+});
+
+test("jsonc reading returns null rather than throwing on nonsense", () => {
+  const { parseJsonc } = require("../dist/jsonc.js");
+  assert.equal(parseJsonc("{ this is not json"), null);
+});
+
+test("seeded settings fill gaps but never overwrite what is already there", () => {
+  const { applySettings } = require("../dist/profile.js");
+  const { readKey } = require("../dist/jsonc.js");
+  const fresh = applySettings("{}");
+  assert.equal(readKey(fresh, "workbench.activityBar.location"), "top");
+
+  const chosen = applySettings(`{"workbench.activityBar.location": "default"}`);
+  assert.equal(readKey(chosen, "workbench.activityBar.location"), "default");
+});
+
+test("managed settings always win, even over an import", () => {
+  const { applySettings } = require("../dist/profile.js");
+  const { readKey } = require("../dist/jsonc.js");
+  const out = applySettings(`{"workbench.colorTheme": "Monokai", "editor.tabSize": 8}`);
+  assert.equal(readKey(out, "workbench.colorTheme"), "Tode Terminal");
+  assert.equal(readKey(out, "editor.tabSize"), 8);
+});
+
+test("installing keybindings never eats the ones already in the file", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-kb-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installKeybindings, mergeKeybindings, USER_DIR } = require("../dist/profile.js");
+  const { parseJsonc } = require("../dist/jsonc.js");
+  const file = path.join(USER_DIR, "keybindings.json");
+  const read = () => parseJsonc(fs.readFileSync(file, "utf8"));
+  try {
+    installKeybindings();
+    const todeOnly = read().length;
+    assert.ok(todeOnly > 0);
+
+    const mine = [
+      { key: "ctrl+u", command: "cursorMove", when: "editorTextFocus && vim.mode == 'Normal'" },
+      { key: "ctrl+d", command: "cursorMove", when: "editorTextFocus && vim.mode == 'Normal'" },
+    ];
+    assert.equal(mergeKeybindings(mine), 2);
+    assert.equal(read().length, todeOnly + 2);
+
+    // the bug: a later plain run used to rewrite the file with only tode's
+    installKeybindings();
+    const after = read();
+    assert.equal(after.length, todeOnly + 2, "imported bindings were dropped");
+    assert.ok(after.some((b) => b.key === "ctrl+u" && b.command === "cursorMove"));
+
+    // running twice more must stay stable
+    installKeybindings();
+    installKeybindings();
+    assert.equal(read().length, todeOnly + 2);
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("cmd chords get a ctrl twin, except where something else wants the chord", () => {
+  const { mirrorKey } = require("../dist/profile.js");
+  assert.equal(mirrorKey("cmd+1"), "ctrl+1");
+  assert.equal(mirrorKey("cmd+shift+p"), "ctrl+shift+p");
+  assert.equal(mirrorKey("cmd+alt+f"), "ctrl+alt+f");
+  assert.equal(mirrorKey("cmd+shift+alt+l"), "ctrl+shift+alt+l");
+  assert.equal(mirrorKey("meta+1"), "ctrl+1");
+
+  // bare cmd+letter would land on a chord vim and the shell already use
+  assert.equal(mirrorKey("cmd+d"), null);
+  assert.equal(mirrorKey("cmd+u"), null);
+  // these already mean something on ctrl in vscode for macos
+  assert.equal(mirrorKey("cmd+`"), null);
+  assert.equal(mirrorKey("cmd+-"), null);
+  assert.equal(mirrorKey("cmd+tab"), null);
+  // cursor motion differs between the two conventions
+  assert.equal(mirrorKey("cmd+left"), null);
+  // nothing to mirror
+  assert.equal(mirrorKey("ctrl+p"), null);
+  assert.equal(mirrorKey("alt+z"), null);
+  // a two step chord would need both halves rewritten
+  assert.equal(mirrorKey("cmd+k cmd+s"), null);
+});
+
+test("mirrors keep the when clause and drop duplicates", () => {
+  const { ctrlMirrors } = require("../dist/profile.js");
+  const made = ctrlMirrors([
+    { key: "cmd+1", command: "focusFirst", when: "editorFocus" },
+    { key: "cmd+1", command: "focusFirst", when: "editorFocus" },
+    { key: "cmd+d", command: "nope" },
+  ]);
+  assert.deepEqual(made, [{ key: "ctrl+1", command: "focusFirst", when: "editorFocus" }]);
+});
+
+
+test("the bridge binds ctrl+c to quit, but not in the terminal", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-bridge-"));
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installBridge, BRIDGE_DIR } = require("../dist/bridge.js");
+  try {
+    installBridge(["/usr/local/bin/tode"]);
+    const pkg = JSON.parse(fs.readFileSync(path.join(BRIDGE_DIR, "package.json"), "utf8"));
+    const binding = pkg.contributes.keybindings[0];
+    assert.equal(binding.key, "ctrl+c");
+    assert.equal(binding.command, "tode.quit");
+    assert.equal(binding.when, "!terminalFocus", "ctrl+c must be left alone in the terminal");
+
+    const command = pkg.contributes.commands[0];
+    assert.equal(command.command, "tode.quit");
+    assert.equal(`${command.category}: ${command.title}`, "tode: Quit");
+
+    // "*" is rejected for an extension that ships code, and it fails silently
+    assert.notEqual(pkg.engines.vscode, "*");
+    assert.match(pkg.engines.vscode, /^\^?\d+\.\d+/);
+
+    const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
+    assert.match(source, /registerCommand\("tode\.quit"/);
+    assert.match(source, /\/usr\/local\/bin\/tode/);
+  } finally {
+    process.env.XDG_DATA_HOME = prev;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("the theme extension also declares a usable engine range", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-theme-eng-"));
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installTheme, EXTENSIONS_DIR } = require("../dist/profile.js");
+  const { withFallbacks } = require("../dist/terminal/osc.js");
+  try {
+    installTheme(withFallbacks(null));
+    const dir = fs.readdirSync(EXTENSIONS_DIR).find((d) => d.startsWith("tode.tode-theme"));
+    const pkg = JSON.parse(fs.readFileSync(path.join(EXTENSIONS_DIR, dir, "package.json"), "utf8"));
+    assert.notEqual(pkg.engines.vscode, "*");
+  } finally {
+    process.env.XDG_DATA_HOME = prev;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("goto accepts file, file:line and file:line:column", () => {
+  const { parseGoto } = require("../dist/ipc.js");
+  assert.deepEqual(parseGoto("src/a.ts:12:5"), { path: "src/a.ts", line: 12, column: 5 });
+  assert.deepEqual(parseGoto("src/a.ts:12"), { path: "src/a.ts", line: 12, column: 1 });
+  assert.deepEqual(parseGoto("src/a.ts"), { path: "src/a.ts" });
+  // a real path wins over the line-number reading of it
+  assert.deepEqual(parseGoto("/etc/hosts"), { path: "/etc/hosts" });
+});
+
+test("a window is only reused when its socket is really there", () => {
+  const { runningWindow } = require("../dist/ipc.js");
+  const prev = process.env.TODE_IPC;
+  try {
+    delete process.env.TODE_IPC;
+    assert.equal(runningWindow(), null);
+    process.env.TODE_IPC = "/tmp/definitely-not-a-socket-xyz";
+    assert.equal(runningWindow(), null, "a missing socket must not be treated as a window");
+  } finally {
+    if (prev === undefined) delete process.env.TODE_IPC;
+    else process.env.TODE_IPC = prev;
+  }
+});
+
+test("open requests reach a listening window", async () => {
+  const net = require("node:net");
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { sendToWindow } = require("../dist/ipc.js");
+  const sock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tode-ipc-")), "w.sock");
+  const seen = [];
+  const server = net.createServer((c) => {
+    let buf = "";
+    c.on("data", (d) => {
+      buf += d;
+      if (!buf.includes("\n")) return;
+      seen.push(JSON.parse(buf.split("\n")[0]));
+      c.end(JSON.stringify({ ok: true }) + "\n");
+    });
+  });
+  await new Promise((r) => server.listen(sock, r));
+  try {
+    await sendToWindow(sock, { files: [{ path: "/a.ts", line: 3, column: 2 }], folders: [], add: false });
+    assert.deepEqual(seen[0].files, [{ path: "/a.ts", line: 3, column: 2 }]);
+  } finally {
+    server.close();
+  }
+});
+
+test("a window that refuses is reported, not swallowed", async () => {
+  const net = require("node:net");
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { sendToWindow } = require("../dist/ipc.js");
+  const sock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tode-ipc-")), "w.sock");
+  const server = net.createServer((c) => c.end(JSON.stringify({ ok: false, error: "nope" }) + "\n"));
+  await new Promise((r) => server.listen(sock, r));
+  try {
+    await assert.rejects(
+      () => sendToWindow(sock, { files: [], folders: [], add: false }),
+      /nope/,
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test("the generated extension is valid javascript", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const vm = require("node:vm");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-syntax-"));
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installBridge, BRIDGE_DIR } = require("../dist/bridge.js");
+  try {
+    installBridge(["/usr/local/bin/tode"]);
+    const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
+    // a syntax error here means the extension never activates, and nothing says so
+    assert.doesNotThrow(() => new vm.Script(source), "generated extension must parse");
+    // escapes have to survive being written through a template literal
+    assert.doesNotMatch(source, /indexOf\("\n/, "a newline escape collapsed into a real newline");
+    assert.match(source, /net\.createServer/);
+    assert.match(source, /environmentVariableCollection\.replace\("TODE_IPC"/);
+  } finally {
+    process.env.XDG_DATA_HOME = prev;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("code's flags are taken, not rejected", () => {
+  const { execFileSync } = require("node:child_process");
+  const help = execFileSync("node", [require("node:path").join(__dirname, "..", "dist", "main.js"), "--help"], {
+    encoding: "utf8",
+  });
+  for (const flag of ["-g, --goto", "-a, --add", "-n, --new-window", "-w, --wait", "-d, --diff", "-r, --reuse-window"]) {
+    assert.match(help, new RegExp(flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${flag} should be documented`);
+  }
+});
+
+test("a folder request is acknowledged before the window reloads", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-ack-"));
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installBridge, BRIDGE_DIR } = require("../dist/bridge.js");
+  try {
+    installBridge(["/usr/local/bin/tode"]);
+    const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
+    const ackAt = source.indexOf("acknowledge();\n  for (const uri of wanted)");
+    const openAt = source.indexOf("vscode.openFolder");
+    assert.ok(ackAt > 0, "the folder loop must be preceded by an acknowledgement");
+    assert.ok(ackAt < openAt, "openFolder reloads the window, so the reply must go first");
+    assert.match(source, /alreadyOpen/, "reopening the folder already open should do nothing");
+  } finally {
+    process.env.XDG_DATA_HOME = prev;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("help states the routing rules for a tode terminal", () => {
+  const { execFileSync } = require("node:child_process");
+  const path = require("node:path");
+  const help = execFileSync("node", [path.join(__dirname, "..", "dist", "main.js"), "--help"], {
+    encoding: "utf8",
+  });
+  assert.match(help, /a file opens in that window and a folder\s*\n?opens its own pane/i);
+  assert.match(help, /-r, --reuse-window\s+Open the folder in this window/);
+});
+
+test("-r is a real flag now, not something quietly dropped", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(path.join(__dirname, "..", "src", "main.ts"), "utf8");
+  const ignored = source.slice(source.indexOf("const IGNORED:"), source.indexOf("const IGNORED_WITH_VALUE"));
+  assert.doesNotMatch(ignored, /"-r"/, "-r must not be in the ignored list");
+  assert.doesNotMatch(ignored, /"--reuse-window"/);
+  assert.match(source, /takeBool\(args, "-r"\)/);
+});

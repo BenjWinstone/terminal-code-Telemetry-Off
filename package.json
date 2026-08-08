@@ -1,0 +1,17 @@
+{
+  "name": "tode",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "tode": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.json && node --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
