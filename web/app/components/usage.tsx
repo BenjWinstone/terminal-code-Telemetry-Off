@@ -5,8 +5,8 @@
 const LINES = [
   { cmd: "tode", note: "opens the current folder" },
   { cmd: "tode <folder>", note: "opens that folder" },
-  { cmd: "tode <file>", note: "opens the file, in the project it belongs to" },
-  { cmd: "tode --split right", note: "opens in a pane beside you" },
+  { cmd: "tode <file>", note: "opens the file" },
+  { cmd: "tode --split right", note: "opens tode " },
   { cmd: "tode import", note: "brings your vscode settings over" },
 ];
 
