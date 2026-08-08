@@ -35,8 +35,29 @@ export default function VideoPlayer({
   ratio?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fillRef = useRef<HTMLDivElement | null>(null);
   const [isLight, setIsLight] = useState(false);
   const [playing, setPlaying] = useState(false);
+
+  /* The browser sends timeupdate about four times a second. If React drives the
+     bar from those events, the bar moves in steps. A CSS transition only turns
+     the steps into a stutter, because each step starts and stops. While the
+     video plays, this loop writes the width on every frame instead, and it
+     writes to the node directly to prevent a render on each frame. */
+  useEffect(() => {
+    if (!playing) return;
+    let frame = 0;
+    const tick = () => {
+      const v = videoRef.current;
+      const fill = fillRef.current;
+      if (v && fill && v.duration) {
+        fill.style.width = `${(v.currentTime / v.duration) * 100}%`;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [playing]);
 
   const capture = isLight ? light : dark;
 
@@ -119,7 +140,17 @@ export default function VideoPlayer({
          nested one corner radius inside another. */
       className="focus:outline-none"
     >
-      <div className="relative">
+      {/* The border goes on the wrapper, so it traces the clipped corner and
+          not the square edge of the video. A radius clips the content at the
+          padding box, which sits 1px inside the border, so the outer radius
+          carries an extra 1px. Without it the clip is 1px short and the
+          desktop shows again in the corner. */}
+      <div
+        className="relative overflow-hidden border border-border"
+        style={{
+          borderRadius: "calc(1.8057% + 1px) / calc(2.6851% + 1px)",
+        }}
+      >
         <video
           ref={videoRef}
           key={capture.src}
@@ -129,7 +160,14 @@ export default function VideoPlayer({
           playsInline
           muted
           className="block w-full cursor-pointer"
-          style={{ aspectRatio: ratio }}
+          /* The frame itself is square; the editor window inside it is what is
+             rounded, and the desktop shows through the four corner notches.
+             Clipping at the window's own corner radius removes them exactly.
+             58px of the 3212px capture = 1.8057% of the width, measured by
+             differencing the two backdrops. Given as a percentage pair so the
+             corner stays circular and scales with the element: the vertical
+             figure is the horizontal one times the 1.487 aspect. */
+          style={{ aspectRatio: ratio, borderRadius: "1.8057% / 2.6851%" }}
           onClick={toggle}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
@@ -188,9 +226,12 @@ export default function VideoPlayer({
           tabIndex={-1}
         >
           <div className="relative h-[2px] rounded-full bg-border">
+            {/* the loop owns the width while the video plays, so React must not
+                write it back on the renders that the time label causes */}
             <div
-              className="absolute inset-y-0 left-0 rounded-full bg-text2 transition-[width] duration-100"
-              style={{ width: `${progress}%` }}
+              ref={fillRef}
+              className="absolute inset-y-0 left-0 rounded-full bg-text2"
+              style={playing ? undefined : { width: `${progress}%` }}
             />
           </div>
         </div>
