@@ -1,6 +1,3 @@
-/** VS Code writes its settings with comments, so tode edits the text in place
- * rather than reparsing and rewriting the whole file. */
-
 function skipLineComment(source: string, at: number): number {
   const end = source.indexOf("\n", at);
   return end < 0 ? source.length : end;

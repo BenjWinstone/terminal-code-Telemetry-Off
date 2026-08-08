@@ -491,3 +491,177 @@ test("-r is a real flag now, not something quietly dropped", () => {
   assert.doesNotMatch(ignored, /"--reuse-window"/);
   assert.match(source, /takeBool\(args, "-r"\)/);
 });
+
+test("keybind lines are parsed into a trigger to action table", () => {
+  const { parseKeybinds } = require("../dist/terminal/ghostty.js");
+  const table = parseKeybinds(
+    "keybind = super+backspace=text:\\\\x15\nkeybind = super+shift+z=redo\nnot a keybind line\n",
+  );
+  assert.equal(table.get("super+backspace"), "text:\\\\x15");
+  assert.equal(table.get("super+shift+z"), "redo");
+  assert.equal(table.size, 2);
+});
+
+test("only chords bound to something other than unbind or ignore are conflicts", () => {
+  const { findConflicts, CHORD_TARGETS } = require("../dist/terminal/ghostty.js");
+  const effective = new Map(CHORD_TARGETS.map((t) => [t.trigger, "text:\\\\x15"]));
+  effective.set("super+backspace", "unbind");
+  effective.set("super+z", "ignore");
+  const conflicts = findConflicts(effective);
+  assert.equal(conflicts.some((c) => c.trigger === "super+backspace"), false, "already unbound");
+  assert.equal(conflicts.some((c) => c.trigger === "super+z"), false, "already ignored");
+  assert.equal(conflicts.length, CHORD_TARGETS.length - 2);
+});
+
+test("a chord ghostty never bound at all is not a conflict", () => {
+  const { findConflicts } = require("../dist/terminal/ghostty.js");
+  assert.deepEqual(findConflicts(new Map()), []);
+});
+
+test("the generated keybinds file only touches the confirmed triggers", () => {
+  const { keybindsFileContents, CHORD_TARGETS } = require("../dist/terminal/ghostty.js");
+  const subset = [CHORD_TARGETS[0], CHORD_TARGETS[2]];
+  const content = keybindsFileContents(subset);
+  assert.match(content, /keybind = super\+backspace=unbind/);
+  assert.match(content, /keybind = super\+arrow_right=unbind/);
+  assert.doesNotMatch(content, /super\+z/);
+});
+
+test("the include line is added once and only once", () => {
+  const { withInclude, INCLUDE_LINE } = require("../dist/terminal/ghostty.js");
+  const once = withInclude("window-save-state = always\n");
+  assert.match(once, new RegExp(INCLUDE_LINE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const twice = withInclude(once);
+  assert.equal(twice, once, "adding it again must not duplicate it");
+});
+
+test("the include line survives a config with no trailing newline", () => {
+  const { withInclude } = require("../dist/terminal/ghostty.js");
+  const out = withInclude("window-save-state = always");
+  assert.equal(out.split("\n").filter((l) => l.startsWith("config-file")).length, 1);
+  assert.ok(out.includes("window-save-state = always\nconfig-file"), "must not run onto the same line");
+});
+
+test("undoing removes only the include line, nothing else the user wrote", () => {
+  const { withoutInclude, INCLUDE_LINE } = require("../dist/terminal/ghostty.js");
+  const config = `window-save-state = always\nfont-size = 14\n${INCLUDE_LINE}\ntheme = dark\n`;
+  const after = withoutInclude(config);
+  assert.doesNotMatch(after, new RegExp(INCLUDE_LINE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(after, /font-size = 14/);
+  assert.match(after, /theme = dark/);
+});
+
+test("apply then undo round-trips to a clean config, on a real filesystem", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const { applyFix, undoFix, CHORD_TARGETS, findConflicts } = require("../dist/terminal/ghostty.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-ghostty-"));
+  fs.writeFileSync(path.join(dir, "config"), "window-save-state = always\n");
+  const conflicts = findConflicts(new Map());
+  const all = CHORD_TARGETS.map((t) => ({ ...t, current: "text:x" }));
+  applyFix(dir, all);
+  assert.ok(fs.existsSync(path.join(dir, "tode", "keybinds.ghostty")));
+  const config = fs.readFileSync(path.join(dir, "config"), "utf8");
+  assert.match(config, /window-save-state = always/, "the user's own line survives");
+  assert.match(config, /config-file = \?tode\/keybinds\.ghostty/);
+
+  const undone = undoFix(dir);
+  assert.equal(undone, true);
+  assert.equal(fs.existsSync(path.join(dir, "tode", "keybinds.ghostty")), false);
+  const restored = fs.readFileSync(path.join(dir, "config"), "utf8");
+  assert.equal(restored, "window-save-state = always\n");
+});
+
+test("the exact regression: what ghostty 1.3.1 actually ships for these", () => {
+  // pinned from `ghostty +list-keybinds --default` on 1.3.1, so a future ghostty
+  // release that changes its defaults shows up here rather than silently
+  const { parseKeybinds, findConflicts } = require("../dist/terminal/ghostty.js");
+  const shipped = parseKeybinds([
+    "keybind = super+arrow_right=text:\\\\x05",
+    "keybind = super+arrow_left=text:\\\\x01",
+    "keybind = super+backspace=text:\\\\x15",
+    "keybind = super+z=undo",
+    "keybind = super+shift+z=redo",
+    "keybind = super+shift+t=undo",
+    "keybind = super+a=select_all",
+    "keybind = super+w=close_surface",
+  ].join("\n"));
+  const conflicts = findConflicts(shipped);
+  assert.equal(conflicts.length, 8, "every one of ghostty's defaults here should be flagged");
+});
+
+test("changing the palette gets a new theme folder, so a warm browser cannot cache it stale", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-theme-cache-"));
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installTheme, EXTENSIONS_DIR } = require("../dist/profile.js");
+  const { withFallbacks } = require("../dist/terminal/osc.js");
+  try {
+    // registerThemeExtension only rewrites extensions.json once one already
+    // exists — matches the real machine, where other extensions got there first
+    fs.mkdirSync(EXTENSIONS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), "[]\n");
+    const first = withFallbacks({ background: [0, 0, 0], foreground: [255, 255, 255], ansi: new Array(16).fill([100, 100, 100]) });
+    const { fingerprint: fp1 } = installTheme(first);
+    const dirsAfterFirst = fs.readdirSync(EXTENSIONS_DIR).filter((d) => d.startsWith("tode.tode-theme-"));
+    assert.deepEqual(dirsAfterFirst, [`tode.tode-theme-${fp1}`]);
+
+    // re-installing the identical palette must not touch the folder at all —
+    // this is the "skip when nothing changed" optimisation, still working
+    const before = fs.statSync(path.join(EXTENSIONS_DIR, dirsAfterFirst[0], "themes", "tode-terminal.json")).mtimeMs;
+    const repeat = installTheme(first);
+    assert.equal(repeat.changed, false);
+    const after = fs.statSync(path.join(EXTENSIONS_DIR, dirsAfterFirst[0], "themes", "tode-terminal.json")).mtimeMs;
+    assert.equal(before, after);
+
+    // the actual bug: a real theme change must produce a genuinely new folder
+    // name, which is what makes it a new url a cached browser cannot conflate
+    // with the old one
+    const second = withFallbacks({ background: [255, 255, 255], foreground: [0, 0, 0], ansi: new Array(16).fill([200, 200, 200]) });
+    const { changed, fingerprint: fp2 } = installTheme(second);
+    assert.equal(changed, true);
+    assert.notEqual(fp1, fp2, "two different palettes must not collide on the same fingerprint");
+    const dirsAfterSecond = fs.readdirSync(EXTENSIONS_DIR).filter((d) => d.startsWith("tode.tode-theme-"));
+    assert.deepEqual(dirsAfterSecond, [`tode.tode-theme-${fp2}`], "the stale folder must be gone, not just superseded");
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), "utf8"));
+    const entry = manifest.find((e) => e.identifier.id === "tode.tode-theme");
+    assert.equal(entry.relativeLocation, `tode.tode-theme-${fp2}`, "extensions.json must point at the new folder");
+  } finally {
+    process.env.XDG_DATA_HOME = prev;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("registerThemeExtension with no argument finds the theme actually on disk", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-theme-reg-"));
+  const prev = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  for (const key of Object.keys(require.cache)) delete require.cache[key];
+  const { installTheme, registerThemeExtension, EXTENSIONS_DIR } = require("../dist/profile.js");
+  const { withFallbacks } = require("../dist/terminal/osc.js");
+  try {
+    const { fingerprint } = installTheme(withFallbacks(null));
+    // simulate an extensions.json rewritten by something else, e.g. an install,
+    // that dropped tode's own entry
+    fs.writeFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), "[]\n");
+    registerThemeExtension();
+    const manifest = JSON.parse(fs.readFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), "utf8"));
+    const entry = manifest.find((e) => e.identifier.id === "tode.tode-theme");
+    assert.ok(entry, "the theme must be re-registered");
+    assert.equal(entry.relativeLocation, `tode.tode-theme-${fingerprint}`);
+  } finally {
+    process.env.XDG_DATA_HOME = prev;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { EXTENSIONS_DIR } from "./profile";
+import { EXTENSIONS_DIR, LIVE_SETTINGS_FILE } from "./profile";
 
 const BRIDGE_ID = "tode.tode-bridge";
 const BRIDGE_VERSION = "1.0.0";
@@ -32,7 +32,7 @@ function manifest(): unknown {
   };
 }
 
-function extensionSource(tode: string[]): string {
+function extensionSource(tode: string[], liveSettingsFile: string): string {
   return `const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
@@ -41,7 +41,56 @@ const path = require("path");
 const vscode = require("vscode");
 
 const TODE = ${JSON.stringify(tode)};
+const LIVE_SETTINGS_FILE = ${JSON.stringify(liveSettingsFile)};
 const NL = String.fromCharCode(10);
+
+/** The contributed theme is correct on the next full window load, but a
+ * terminal theme change should not need one — this is what makes it live.
+ * settings applied through the configuration api reflect instantly, unlike a
+ * plain edit of settings.json on disk, which vscode does not react to on its
+ * own. tode writes the same colours here on every open too, so a fresh window
+ * has full fidelity immediately rather than waiting on the next terminal
+ * colour change to arrive. */
+function applyLiveSettings() {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(LIVE_SETTINGS_FILE, "utf8"));
+  } catch (error) {
+    return;
+  }
+  const cfg = vscode.workspace.getConfiguration();
+  const target = vscode.ConfigurationTarget.Global;
+  if (parsed["workbench.colorCustomizations"]) {
+    cfg.update("workbench.colorCustomizations", parsed["workbench.colorCustomizations"], target);
+  }
+  if (parsed["editor.tokenColorCustomizations"]) {
+    cfg.update("editor.tokenColorCustomizations", parsed["editor.tokenColorCustomizations"], target);
+  }
+}
+
+/** The writer replaces the file with an atomic rename, which on some
+ * platforms stops a watch on the file's own path from firing again once the
+ * rename swaps the inode out from under it, so the directory is watched and
+ * filtered by name instead. */
+function watchLiveSettings() {
+  applyLiveSettings();
+  const dir = path.dirname(LIVE_SETTINGS_FILE);
+  const name = path.basename(LIVE_SETTINGS_FILE);
+  let timer = null;
+  let watcher = null;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    watcher = fs.watch(dir, { persistent: false }, function (_event, filename) {
+      if (filename && filename !== name) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(applyLiveSettings, 30);
+    });
+  } catch (error) {}
+  return function () {
+    if (timer) clearTimeout(timer);
+    if (watcher) watcher.close();
+  };
+}
 
 /** Running tode from inside tode should change this window rather than open
  * another one, which is what the socket is for: the cli finds it through an
@@ -160,6 +209,9 @@ function activate(context) {
     }),
   );
 
+  const stopWatchingSettings = watchLiveSettings();
+  context.subscriptions.push({ dispose: stopWatchingSettings });
+
   const sock = socketPath();
   const server = net.createServer(function (connection) {
     let buffer = "";
@@ -227,7 +279,7 @@ export function installBridge(tode: string[]): boolean {
   );
   const wroteSource = writeIfChanged(
     path.join(BRIDGE_DIR, "extension.js"),
-    extensionSource(tode),
+    extensionSource(tode, LIVE_SETTINGS_FILE),
   );
   registerBridge();
   return wroteManifest || wroteSource;

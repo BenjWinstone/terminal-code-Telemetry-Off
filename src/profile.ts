@@ -12,6 +12,7 @@ import { hex, legible, mix } from "./theme/color";
 import {
   THEME_NAME,
   generateTheme,
+  liveSettings,
   paletteFingerprint,
   semanticColors,
   surfaces,
@@ -20,8 +21,37 @@ import {
 export const VSCODE_DIR = path.join(DATA_DIR, "vscode");
 export const USER_DIR = path.join(VSCODE_DIR, "user-data", "User");
 export const EXTENSIONS_DIR = path.join(VSCODE_DIR, "extensions");
-const THEME_EXTENSION = path.join(EXTENSIONS_DIR, "tode.tode-theme-1.0.0");
+const THEME_EXTENSION_ID = "tode.tode-theme";
+
+/** code-server serves extension resources with a year-long cache-control, on the
+ * assumption that a given (id, version, path) never changes its bytes — true for
+ * a real published extension, false for ours, which rewrites the same theme
+ * repeatedly. Chromium stays warm across tode sessions for speed, so a stable
+ * folder name would mean a palette change is invisible until that cache clears
+ * on its own. Folding the fingerprint into the folder name makes each distinct
+ * palette its own URL, so a real change always misses the cache while an
+ * unchanged one keeps hitting it for free. */
+function themeExtensionDir(fingerprint: string): string {
+  return path.join(EXTENSIONS_DIR, `${THEME_EXTENSION_ID}-${fingerprint}`);
+}
+
+function forgetOldThemeExtensions(keep: string): void {
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(EXTENSIONS_DIR);
+  } catch {
+    return;
+  }
+  const prefix = `${THEME_EXTENSION_ID}-`;
+  for (const entry of entries) {
+    if (entry.startsWith(prefix) && entry !== keep) {
+      fs.rmSync(path.join(EXTENSIONS_DIR, entry), { recursive: true, force: true });
+    }
+  }
+}
 const PALETTE_CACHE = path.join(DATA_DIR, "palette.json");
+export const LIVE_SETTINGS_FILE = path.join(DATA_DIR, "live-settings.json");
+export const LIVE_COLORS_FILE = path.join(DATA_DIR, "live-colors.raw.json");
 
 export const FONT_FAMILY = "JetBrains Mono";
 const FONT_FILE = "JetBrainsMono-Regular.ttf";
@@ -54,6 +84,14 @@ export function cachedPalette(): TerminalPalette | null {
   }
 }
 
+/** A palette learned some other way than the tty query — a live change coming
+ * through terminal-browser — is still worth remembering, so the next open
+ * falls back to it if the terminal happens not to answer that time. */
+export function cachePalette(palette: TerminalPalette): void {
+  fs.mkdirSync(path.dirname(PALETTE_CACHE), { recursive: true });
+  fs.writeFileSync(PALETTE_CACHE, `${JSON.stringify(palette, null, 2)}\n`);
+}
+
 /** Ask the terminal, and keep the answer, so a pane that cannot be queried still
  * gets the colours this terminal reported last time. */
 export async function readPalette(): Promise<{ palette: TerminalPalette; source: "terminal" | "cache" | "default" }> {
@@ -82,41 +120,39 @@ function writeIfChanged(file: string, contents: string): boolean {
  * theme and can carry token colours instead of only workbench ones. */
 export function installTheme(palette: TerminalPalette): { changed: boolean; fingerprint: string } {
   const fingerprint = paletteFingerprint(palette);
-  // building the theme means generating several hundred colours, so it is worth
-  // recognising that the terminal is still the colour it was last time
-  const stamp = path.join(THEME_EXTENSION, "palette");
-  try {
-    if (fs.readFileSync(stamp, "utf8") === fingerprint) return { changed: false, fingerprint };
-  } catch {}
-  const theme = generateTheme(palette);
-  const manifest = {
-    name: "tode-theme",
-    displayName: "tode terminal theme",
-    publisher: "tode",
-    version: "1.0.0",
-    engines: { vscode: "^1.80.0" },
-    categories: ["Themes"],
-    contributes: {
-      themes: [
-        {
-          label: THEME_NAME,
-          uiTheme: theme.type === "dark" ? "vs-dark" : "vs",
-          path: "./themes/tode-terminal.json",
-        },
-      ],
-    },
-  };
-  const wroteManifest = writeIfChanged(
-    path.join(THEME_EXTENSION, "package.json"),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
-  const wroteTheme = writeIfChanged(
-    path.join(THEME_EXTENSION, "themes", "tode-terminal.json"),
-    `${JSON.stringify(theme, null, 2)}\n`,
-  );
-  registerThemeExtension();
-  fs.writeFileSync(stamp, fingerprint);
-  return { changed: wroteManifest || wroteTheme, fingerprint };
+  const dir = themeExtensionDir(fingerprint);
+  // this exact fingerprint already has a folder, so the palette has not moved
+  // and there is nothing to regenerate or re-register
+  const already = fs.existsSync(path.join(dir, "themes", "tode-terminal.json"));
+  if (!already) {
+    const theme = generateTheme(palette);
+    const manifest = {
+      name: `tode-theme-${fingerprint}`,
+      displayName: "tode terminal theme",
+      publisher: "tode",
+      version: "1.0.0",
+      engines: { vscode: "^1.80.0" },
+      categories: ["Themes"],
+      contributes: {
+        themes: [
+          {
+            label: THEME_NAME,
+            uiTheme: theme.type === "dark" ? "vs-dark" : "vs",
+            path: "./themes/tode-terminal.json",
+          },
+        ],
+      },
+    };
+    fs.mkdirSync(path.join(dir, "themes"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    fs.writeFileSync(
+      path.join(dir, "themes", "tode-terminal.json"),
+      `${JSON.stringify(theme, null, 2)}\n`,
+    );
+  }
+  registerThemeExtension(dir);
+  forgetOldThemeExtensions(path.basename(dir));
+  return { changed: !already, fingerprint };
 }
 
 interface ExtensionEntry {
@@ -127,10 +163,37 @@ interface ExtensionEntry {
   metadata?: Record<string, unknown>;
 }
 
+function newestThemeExtensionDir(): string | null {
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(EXTENSIONS_DIR);
+  } catch {
+    return null;
+  }
+  const prefix = `${THEME_EXTENSION_ID}-`;
+  const withMtime = entries
+    .filter((entry) => entry.startsWith(prefix))
+    .map((entry) => {
+      const full = path.join(EXTENSIONS_DIR, entry);
+      try {
+        return { full, mtime: fs.statSync(full).mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is { full: string; mtime: number } => entry !== null);
+  if (withMtime.length === 0) return null;
+  withMtime.sort((a, b) => b.mtime - a.mtime);
+  return withMtime[0].full;
+}
+
 /** Once an extensions.json exists, vscode reads that instead of looking at the
  * folder, so an import that writes one would hide the theme unless it is listed
- * there too. */
-export function registerThemeExtension(): void {
+ * there too. With no folder given, whichever one was written most recently is
+ * what "the current theme" means. */
+export function registerThemeExtension(dir?: string): void {
+  const themeDir = dir ?? newestThemeExtensionDir();
+  if (!themeDir) return;
   const manifest = path.join(EXTENSIONS_DIR, "extensions.json");
   let listed: ExtensionEntry[] = [];
   try {
@@ -139,12 +202,12 @@ export function registerThemeExtension(): void {
   } catch {
     return;
   }
-  const folder = path.basename(THEME_EXTENSION);
+  const folder = path.basename(themeDir);
   const entry: ExtensionEntry = {
-    identifier: { id: "tode.tode-theme" },
+    identifier: { id: THEME_EXTENSION_ID },
     version: "1.0.0",
     relativeLocation: folder,
-    location: { $mid: 1, path: THEME_EXTENSION, scheme: "file" },
+    location: { $mid: 1, path: themeDir, scheme: "file" },
     metadata: { isApplicationScoped: false, isMachineScoped: false, installedTimestamp: 0 },
   };
   const without = listed.filter((item) => item.identifier?.id !== entry.identifier.id);
@@ -206,6 +269,17 @@ export function installCss(palette: TerminalPalette): boolean {
       },
     ),
   );
+}
+
+/** Every open tode bridge instance watches this file and applies whatever it
+ * finds through the settings API, which is what makes a change reflect without
+ * a reload — the contributed theme extension only takes effect on the next
+ * one. Written on every open as well as on a live change, so a fresh window
+ * gets full fidelity immediately rather than waiting on the next terminal
+ * colour change to arrive. */
+export function installLiveSettings(palette: TerminalPalette): boolean {
+  const settings = liveSettings(palette);
+  return writeIfChanged(LIVE_SETTINGS_FILE, `${JSON.stringify(settings)}\n`);
 }
 
 export function managedSettings(): Record<string, unknown> {
@@ -428,8 +502,4 @@ export function mergeKeybindings(theirs: Binding[]): number {
   const added = theirs.filter((entry) => !existing.some((have) => sameBinding(have, entry)));
   writeBindings(mine, [...existing, ...added]);
   return added.length;
-}
-
-export function profilePaths() {
-  return { userDir: USER_DIR, extensionsDir: EXTENSIONS_DIR, themeExtension: THEME_EXTENSION };
 }
