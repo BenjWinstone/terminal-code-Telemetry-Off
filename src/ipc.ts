@@ -14,6 +14,11 @@ export interface OpenRequest {
   /** hold until the files are closed again, the way a commit editor must */
   wait?: boolean;
   diff?: string[];
+  /** a workbench view to focus, like "scm" for tode --review */
+  view?: string;
+  /** a vscode theme document to apply live, sent by the browser main script
+   * when the terminal's theme changes */
+  theme?: Record<string, unknown>;
 }
 
 /** A tode window puts the address of its socket into every terminal it opens, so

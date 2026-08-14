@@ -4,6 +4,7 @@ import net from "node:net";
 import path from "node:path";
 
 import { DATA_DIR, LOGS_DIR, STATE_DIR } from "../runtime/paths";
+import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetch } from "./vendored";
 
 const VSCODE_DIR = path.join(DATA_DIR, "vscode");
 const STATE_FILE = path.join(STATE_DIR, "server.json");
@@ -31,15 +32,12 @@ function fontAsset(): string {
 }
 
 export function codeServerBin(): string {
-  const configured = process.env.TODE_CODE_SERVER;
-  if (configured) return configured;
-  try {
-    return execFileSync("which", ["code-server"], { encoding: "utf8" }).trim();
-  } catch {
-    throw new Error(
-      "code-server is not on PATH. Install it (brew install code-server) or set TODE_CODE_SERVER.",
-    );
-  }
+  const found = installedCodeServer();
+  if (found) return found;
+  throw new Error(
+    "no code-server on this machine yet — run `tode provision` to fetch the pinned build, " +
+      "or set TODE_CODE_SERVER to one you installed yourself",
+  );
 }
 
 function readState(): ServerState | null {
@@ -64,7 +62,7 @@ function running(pid: number): boolean {
   }
 }
 
-function answering(port: number, timeout = 400): Promise<boolean> {
+export function answering(port: number, timeout = 400): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.connect({ port, host: "127.0.0.1" });
     const settle = (value: boolean) => {
@@ -77,7 +75,7 @@ function answering(port: number, timeout = 400): Promise<boolean> {
   });
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
     probe.once("error", reject);
@@ -114,7 +112,10 @@ export async function ensureServer(): Promise<ServerState> {
   const existing = await currentServer();
   if (existing) return existing;
 
-  const bin = codeServerBin();
+  // allowed to download the pinned bundle: a fresh machine, or the first open
+  // after an upgrade moved the pin — narrated, because a silent 200 MB wait
+  // reads as a hang
+  const bin = await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
   const port = await freePort();
   fs.mkdirSync(LOGS_DIR, { recursive: true });
   const log = fs.openSync(path.join(LOGS_DIR, "code-server.log"), "a");
@@ -174,18 +175,18 @@ async function codeServerReady(port: number, pid: number): Promise<boolean> {
 /** The port ends up inside saved workspace files as the remote authority, and it
  * is also what chromium keys its cache on, so the same one is kept between runs
  * whenever it is still free. */
-async function injectorPort(): Promise<number> {
+async function injectorPort(portFile: string): Promise<number> {
   let previous = 0;
   try {
-    previous = Number(fs.readFileSync(PORT_FILE, "utf8").trim());
+    previous = Number(fs.readFileSync(portFile, "utf8").trim());
   } catch {}
   const port = previous && (await available(previous)) ? previous : await freePort();
-  fs.mkdirSync(path.dirname(PORT_FILE), { recursive: true });
-  fs.writeFileSync(PORT_FILE, String(port));
+  fs.mkdirSync(path.dirname(portFile), { recursive: true });
+  fs.writeFileSync(portFile, String(port));
   return port;
 }
 
-function available(port: number): Promise<boolean> {
+export function available(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = net.createServer();
     probe.once("error", () => resolve(false));
@@ -193,8 +194,12 @@ function available(port: number): Promise<boolean> {
   });
 }
 
-async function startInjector(upstream: number, log: number): Promise<{ pid: number; port: number }> {
-  const port = await injectorPort();
+export async function startInjector(
+  upstream: number,
+  log: number,
+  portFile = PORT_FILE,
+): Promise<{ pid: number; port: number }> {
+  const port = await injectorPort(portFile);
   const script = path.join(__dirname, "injector-main.js");
   const font = fontAsset();
   const child = spawn(process.execPath, [script, String(upstream), String(port), CSS_FILE, font], {

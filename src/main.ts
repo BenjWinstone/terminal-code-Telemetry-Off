@@ -12,35 +12,42 @@ import {
   origin,
   stopServer,
 } from "./codeserver/server";
-import { installBridge } from "./bridge";
-import { doctorCommand } from "./doctor";
+import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetch } from "./codeserver/vendored";
+import { installBridge, requestStartupView } from "./bridge";
+import { BOOT_AFTER_APPLY, firstRunShortcuts, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
 import { parseGoto, runningWindow, sendToWindow } from "./ipc";
 import type { OpenFile } from "./ipc";
 import { EXTENSIONS_DIR, VSCODE_DIR, registerThemeExtension } from "./profile";
 import {
-  LIVE_COLORS_FILE,
   cachePalette,
   ensureFont,
   installCss,
   installKeybindings,
-  installLiveSettings,
+  setLiveTheme,
+  setThemeFile,
   installSettings,
   installTheme,
   readPalette,
 } from "./profile";
-import { watchLiveColors } from "./livesync";
-import { PINNED_VERSION, resolveRuntime, supportedFlags } from "./runtime/release";
+import { launchBrowser } from "./launch";
+import { PINNED_VERSION, resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
 import { BROWSER_HOME } from "./runtime/paths";
 import { resolveTarget, workbenchUrl } from "./target";
 import { upgrade } from "./upgrade";
 import { hex } from "./theme/color";
-import { semanticColors } from "./theme/generate";
+import { generateTheme, semanticColors } from "./theme/generate";
+
+/** Where the installer put the shim — the same computation install.sh makes. */
+function shimPath(): string {
+  const binHome = process.env.XDG_BIN_HOME ?? path.join(os.homedir(), ".local", "bin");
+  return path.join(binHome, "tode");
+}
 
 /** What the bridge extension should run to reach tode again. The shim is
  * preferred because it rebuilds a stale dev tree before running. */
 function todeCommand(): string[] {
-  const shim = path.join(os.homedir(), ".local", "bin", "tode");
+  const shim = shimPath();
   if (fs.existsSync(shim)) return [shim];
   return [process.execPath, process.argv[1]];
 }
@@ -104,38 +111,24 @@ Options:
   --split <direction>   Open in a new pane: right, left, down, up
   --size <fraction>     How much of the space the split takes (0.2 to 0.95)
   --timing              Report how long each stage took
+  --review              Open on the source control panel
 
 Commands:
+  shortcuts             Decide, chord by chord, whether this terminal or the
+                        editor gets each contested shortcut (--status, --undo)
   timing                Where the last page load spent its time
   quit                  Close the tode panes, leaving code-server warm
   import [editor]       Bring settings, keybindings, snippets and extensions
                         over from vscode or a fork of it
-  theme                 Show the colours this terminal reports, and rebuild
+  theme [file]          Show the colours this terminal reports, and rebuild;
+                        with a vscode theme file, set that as the editor theme
   runtime               Which terminal-browser build is in use, and why
+  provision             Fetch the pinned code-server build if it is missing
   daemon status|stop    The code-server that stays warm between opens
   upgrade [--check]     Install the newest build on this channel
   shutdown              Stop everything tode is running
 `;
 
-async function progressRuntime() {
-  let announced = false;
-  return resolveRuntime({
-    onProgress: (stage, fraction) => {
-      if (stage === "downloading") {
-        if (!announced) {
-          process.stderr.write(`tode: fetching terminal-browser ${PINNED_VERSION}\n`);
-          announced = true;
-        }
-        const percent = Math.round(fraction * 100);
-        process.stderr.write(`\r  ${percent}%${percent === 100 ? "\n" : ""}`);
-      }
-      if (stage === "cloning" && !announced) {
-        process.stderr.write(`tode: reusing the terminal-browser ${PINNED_VERSION} already installed\n`);
-        announced = true;
-      }
-    },
-  });
-}
 
 /** Flags code understands that tode has no use for. Swallowing them means a
  * habit, an alias or a script carries over without an error. */
@@ -193,6 +186,7 @@ async function openCommand(args: string[]): Promise<number> {
   const split = takeFlag(args, "--split");
   const size = takeFlag(args, "--size");
   const timing = takeBool(args, "--timing");
+  const review = takeBool(args, "--review");
   const unknown = args.find((arg) => arg.startsWith("-"));
   if (unknown) fail(`unknown option ${unknown}`);
   if (size !== undefined && !split) fail("--size only applies with --split");
@@ -218,10 +212,21 @@ async function openCommand(args: string[]): Promise<number> {
   const sendFolders = here ? folders : [];
   const opensAPane = folders.length > 0 && !here;
 
-  if (window && !opensAPane && (files.length > 0 || sendFolders.length > 0 || pair.length > 0)) {
+  if (
+    window &&
+    !opensAPane &&
+    (files.length > 0 || sendFolders.length > 0 || pair.length > 0 || review)
+  ) {
     await sendToWindow(
       window,
-      { files, folders: sendFolders, add: added.length > 0, wait, diff: pair },
+      {
+        files,
+        folders: sendFolders,
+        add: added.length > 0,
+        wait,
+        diff: pair,
+        ...(review ? { view: "scm" } : {}),
+      },
       wait ? 0 : 4000,
     ).catch((error) => fail(`could not reach the tode window: ${error.message}`));
     return 0;
@@ -232,60 +237,37 @@ async function openCommand(args: string[]): Promise<number> {
   const done = (label: string) => stages.push([label, Date.now() - mark]);
 
   const target = wanted[0] ?? resolveTarget(undefined, process.cwd());
-  const runtime = await progressRuntime();
+  const runtime = await resolveRuntimeWithProgress();
   done("runtime");
   // the terminal is asked for its colours here, while tode still owns the tty
   const { palette } = await readPalette();
   ensureFont();
   installTheme(palette);
-  installBridge(todeCommand());
   installCss(palette);
   installSettings();
-  installKeybindings();
-  installLiveSettings(palette);
+  setLiveTheme(generateTheme(palette));
   done("profile");
+  // once, before the first editor ever shows: contested chords get resolved
+  // while the cost of a wrong one is still zero
+  await firstRunShortcuts();
+  // after the wizard on purpose: the bridge bakes the quit hint and the
+  // keybindings read the decisions, so both have to see what was just chosen
+  installBridge(todeCommand());
+  installKeybindings();
   const server = await ensureServer();
   done("code-server");
-
-  const url = workbenchUrl(origin(server), target);
-  const flags = supportedFlags(runtime);
-  const argv = [url, "--chromeless"];
-  // newer than the pinned release; harmless to leave off until that lands
-  if (flags.has("--mirror-ctrl-digits")) argv.push("--mirror-ctrl-digits");
-  // a sign in flow would otherwise navigate the pane onto github and strand it
-  // there, with no toolbar to come back with
-  if (flags.has("--external-links")) argv.push("--external-links");
-  // lets a genuine terminal theme change reach this window without a reload,
-  // once terminal-browser knows how to report one
-  if (flags.has("--colors-file")) argv.push(`--colors-file=${LIVE_COLORS_FILE}`);
-  if (split) argv.push("--split", split);
-  if (size) argv.push("--size", size);
 
   if (timing) {
     for (const [label, ms] of stages) process.stderr.write(`  ${label.padEnd(12)} ${ms}ms\n`);
   }
 
-  try {
-    fs.writeFileSync(`${CSS_FILE}.launch.json`, JSON.stringify({ spawnedAt: Date.now(), stages }));
-  } catch {}
-  const child = spawn(runtime.bin, ["open", ...argv], { stdio: "inherit" });
-
-  const stopWatching = flags.has("--colors-file")
-    ? watchLiveColors(LIVE_COLORS_FILE, palette, (live) => {
-        installTheme(live);
-        installCss(live);
-        installLiveSettings(live);
-        cachePalette(live);
-      })
-    : () => {};
-
-  return new Promise<number>((resolve) => {
-    child.on("error", (error) => fail(`could not start terminal-browser: ${error.message}`));
-    child.on("exit", (code) => {
-      stopWatching();
-      resolve(code ?? 0);
-    });
-  });
+  // stamped last: the bridge discards markers older than two minutes, and on a
+  // fresh install the wizard and the code-server download can spend all of that
+  if (review) requestStartupView("scm");
+  const url = workbenchUrl(origin(server), target);
+  return launchBrowser(runtime, url, palette, { split, size, stages }).catch((error: Error) =>
+    fail(error.message),
+  );
 }
 
 /** Extensions go into tode's own profile, not whichever code-server the machine
@@ -322,7 +304,17 @@ function swatch(color: string): string {
   return `\x1b[48;2;${r};${g};${b}m   \x1b[0m`;
 }
 
-async function themeCommand(): Promise<number> {
+async function themeCommand(file?: string): Promise<number> {
+  if (file) {
+    const error = setThemeFile(file);
+    if (error) {
+      process.stderr.write(`tode: ${error}\n`);
+      return 1;
+    }
+    installBridge(todeCommand());
+    process.stdout.write(`theme set from ${file} — open windows follow without a reload\n`);
+    return 0;
+  }
   const { palette, source } = await readPalette();
   const where = {
     terminal: "read from this terminal",
@@ -337,6 +329,7 @@ async function themeCommand(): Promise<number> {
   process.stdout.write(`  ${palette.ansi.map((c) => swatch(hex(c))).join("")}  ansi 0-15\n`);
   for (const [name, color] of Object.entries(accent)) process.stdout.write(line(name, hex(color)));
   const { changed, fingerprint } = installTheme(palette);
+  setLiveTheme(generateTheme(palette));
   installBridge(todeCommand());
   installCss(palette);
   installSettings();
@@ -348,7 +341,7 @@ async function themeCommand(): Promise<number> {
 }
 
 async function runtimeCommand(): Promise<number> {
-  const runtime = await progressRuntime();
+  const runtime = await resolveRuntimeWithProgress();
   const why = {
     override: "TODE_TERMINAL_BROWSER_BIN points at it",
     vendored: "shipped inside this install",
@@ -363,6 +356,20 @@ async function runtimeCommand(): Promise<number> {
       `  runtime  ${BROWSER_HOME.runtime}\n` +
       `  chromium ${BROWSER_HOME.appData}\n`,
   );
+  return 0;
+}
+
+/** Everything a first open would have to download, fetched up front: the
+ * installer runs this so the install is complete when it says it is. */
+async function provisionCommand(): Promise<number> {
+  await resolveRuntimeWithProgress();
+  const had = installedCodeServer();
+  if (had) {
+    process.stdout.write(`code-server ready at ${had}\n`);
+    return 0;
+  }
+  const bin = await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
+  process.stdout.write(`code-server ready at ${bin}\n`);
   return 0;
 }
 
@@ -497,11 +504,16 @@ async function upgradeCommand(args: string[]): Promise<number> {
     case "available":
       process.stdout.write(`tode ${outcome.build.version} is available (you have ${outcome.from})\n`);
       return 0;
-    case "upgraded":
+    case "upgraded": {
       // the old code-server is still serving the tree that just moved
       stopServer();
+      // the new tree may pin different bundles; provision through the fresh
+      // shim so the download happens now rather than on the next open
+      const shim = shimPath();
+      if (fs.existsSync(shim)) spawnSync(shim, ["provision"], { stdio: "inherit" });
       process.stdout.write(`tode ${outcome.from} -> ${outcome.build.version}\n`);
       return 0;
+    }
   }
 }
 
@@ -515,10 +527,19 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args[0] === "doctor") return doctorCommand(args.slice(1));
+  if (args[0] === "shortcuts") {
+    const rest = args.slice(1);
+    // install.sh runs the wizard mid-install, where booting an editor on the
+    // installer's cwd would block the script — it passes --no-boot
+    const noBoot = takeBool(rest, "--no-boot");
+    const code = await shortcutsCommand(rest);
+    if (code === BOOT_AFTER_APPLY) return noBoot ? 0 : openCommand([]);
+    return code;
+  }
   if (args[0] === "import") return importCommand(args.slice(1));
-  if (args[0] === "theme") return themeCommand();
+  if (args[0] === "theme") return themeCommand(args[1]);
   if (args[0] === "runtime") return runtimeCommand();
+  if (args[0] === "provision") return provisionCommand();
   if (args[0] === "daemon") return daemonCommand(args[1]);
   if (args[0] === "timing") return timingCommand();
   if (args[0] === "quit") return quitCommand();

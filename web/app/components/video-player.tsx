@@ -38,6 +38,22 @@ export default function VideoPlayer({
   const fillRef = useRef<HTMLDivElement | null>(null);
   const [isLight, setIsLight] = useState(false);
   const [playing, setPlaying] = useState(false);
+  /* expanding is a modal over the page, not the fullscreen api: same video
+     element either way, so playback carries across the switch */
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpanded(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [expanded]);
 
   /* The browser sends timeupdate about four times a second. If React drives the
      bar from those events, the bar moves in steps. A CSS transition only turns
@@ -129,6 +145,9 @@ export default function VideoPlayer({
 
   const progress = duration ? (time / duration) * 100 : 0;
 
+  const [ratioW, ratioH] = ratio.split("/").map((part) => parseFloat(part));
+  const modalWidth = `min(90vw, calc((90vh - 46px) * ${ratioW / ratioH}))`;
+
   return (
     <figure
       onKeyDown={onKeyDown}
@@ -137,18 +156,39 @@ export default function VideoPlayer({
          rounded corners and outline, and it was recorded on a backdrop that
          matches the page (#f9f9f9 / #0c0c0c against #fbfbfa / #0c0c0d), so the
          window reads as the frame. Wrapping it in a second rounded border just
-         nested one corner radius inside another. */
-      className="focus:outline-none"
+         nested one corner radius inside another. Expanded, the figure becomes
+         a backdrop with the player centered as a modal. */
+      className={
+        expanded
+          ? "fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg/90 backdrop-blur-sm focus:outline-none"
+          : "focus:outline-none"
+      }
     >
+      {expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          aria-label="Close"
+          className="absolute top-4 right-5 grid h-[32px] w-[32px] place-items-center text-muted transition-colors hover:text-text"
+        >
+          <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden>
+            <path d="M1 1l10 10M11 1L1 11" />
+          </svg>
+        </button>
+      )}
       {/* The border goes on the wrapper, so it traces the clipped corner and
           not the square edge of the video. A radius clips the content at the
           padding box, which sits 1px inside the border, so the outer radius
           carries an extra 1px. Without it the clip is 1px short and the
           desktop shows again in the corner. */}
       <div
-        className="relative overflow-hidden border border-border"
+        className="relative w-full overflow-hidden border border-border"
         style={{
           borderRadius: "calc(1.8057% + 1px) / calc(2.6851% + 1px)",
+          /* the modal keeps to 90vw/90vh: on a screen shorter than the demo
+             at 90vw, the width backs off until the height fits, with the
+             control row's 46px kept out of the budget */
+          ...(expanded ? { maxWidth: modalWidth } : {}),
         }}
       >
         <video
@@ -195,7 +235,10 @@ export default function VideoPlayer({
         )}
       </div>
 
-      <figcaption className="flex h-[38px] items-center gap-3 pt-1">
+      <figcaption
+        className="flex h-[38px] w-full items-center gap-3 pt-1"
+        style={expanded ? { maxWidth: modalWidth } : undefined}
+      >
         <button
           type="button"
           onClick={toggle}
@@ -239,6 +282,23 @@ export default function VideoPlayer({
         <span className="font-mono text-[11px] tabular-nums text-faint">
           {fmt(time)} / {fmt(duration)}
         </span>
+
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-label={expanded ? "Close" : "Expand"}
+          className="grid h-[22px] w-[22px] place-items-center text-muted transition-colors hover:text-text"
+        >
+          {expanded ? (
+            <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden>
+              <path d="M9 4H6V1M1 6h3v3" />
+            </svg>
+          ) : (
+            <svg width="11" height="11" viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden>
+              <path d="M6 1h3v3M4 9H1V6" />
+            </svg>
+          )}
+        </button>
       </figcaption>
     </figure>
   );

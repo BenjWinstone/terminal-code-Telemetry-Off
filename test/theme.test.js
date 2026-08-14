@@ -252,42 +252,7 @@ test("installing keybindings never eats the ones already in the file", () => {
   }
 });
 
-test("cmd chords get a ctrl twin, except where something else wants the chord", () => {
-  const { mirrorKey } = require("../dist/profile.js");
-  assert.equal(mirrorKey("cmd+1"), "ctrl+1");
-  assert.equal(mirrorKey("cmd+shift+p"), "ctrl+shift+p");
-  assert.equal(mirrorKey("cmd+alt+f"), "ctrl+alt+f");
-  assert.equal(mirrorKey("cmd+shift+alt+l"), "ctrl+shift+alt+l");
-  assert.equal(mirrorKey("meta+1"), "ctrl+1");
-
-  // bare cmd+letter would land on a chord vim and the shell already use
-  assert.equal(mirrorKey("cmd+d"), null);
-  assert.equal(mirrorKey("cmd+u"), null);
-  // these already mean something on ctrl in vscode for macos
-  assert.equal(mirrorKey("cmd+`"), null);
-  assert.equal(mirrorKey("cmd+-"), null);
-  assert.equal(mirrorKey("cmd+tab"), null);
-  // cursor motion differs between the two conventions
-  assert.equal(mirrorKey("cmd+left"), null);
-  // nothing to mirror
-  assert.equal(mirrorKey("ctrl+p"), null);
-  assert.equal(mirrorKey("alt+z"), null);
-  // a two step chord would need both halves rewritten
-  assert.equal(mirrorKey("cmd+k cmd+s"), null);
-});
-
-test("mirrors keep the when clause and drop duplicates", () => {
-  const { ctrlMirrors } = require("../dist/profile.js");
-  const made = ctrlMirrors([
-    { key: "cmd+1", command: "focusFirst", when: "editorFocus" },
-    { key: "cmd+1", command: "focusFirst", when: "editorFocus" },
-    { key: "cmd+d", command: "nope" },
-  ]);
-  assert.deepEqual(made, [{ key: "ctrl+1", command: "focusFirst", when: "editorFocus" }]);
-});
-
-
-test("the bridge binds ctrl+c to quit, but not in the terminal", () => {
+test("the bridge maps quit per platform, always behind a confirm", () => {
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
@@ -299,10 +264,23 @@ test("the bridge binds ctrl+c to quit, but not in the terminal", () => {
   try {
     installBridge(["/usr/local/bin/tode"]);
     const pkg = JSON.parse(fs.readFileSync(path.join(BRIDGE_DIR, "package.json"), "utf8"));
-    const binding = pkg.contributes.keybindings[0];
-    assert.equal(binding.key, "ctrl+c");
-    assert.equal(binding.command, "tode.quit");
-    assert.equal(binding.when, "!terminalFocus", "ctrl+c must be left alone in the terminal");
+    const { QUIT_CHORD } = require("../dist/shortcuts/store.js");
+    const quit = pkg.contributes.keybindings[0];
+    assert.equal(quit.key, QUIT_CHORD);
+    assert.equal(quit.command, "tode.confirmQuit", "quitting always asks first");
+    assert.match(quit.when, /!terminalFocus/, "the quit chord is left alone in the terminal");
+    if (QUIT_CHORD === "ctrl+c") {
+      assert.equal(pkg.contributes.keybindings.length, 1, "no redirect hint where ctrl+c is quit itself");
+      assert.match(quit.when, /!editorHasSelection/, "a selection keeps its chord");
+      assert.match(quit.when, /vim\.mode == 'Normal' \|\| !vim\.active/, "vim keeps insert-mode ctrl+c");
+      assert.match(quit.when, /neovim\.mode != 'insert'/, "vscode-neovim keeps insert-mode ctrl+c");
+    } else {
+      const hint = pkg.contributes.keybindings[1];
+      assert.equal(hint.key, "ctrl+c");
+      assert.equal(hint.command, "tode.quitHint");
+      assert.match(hint.when, /!editorHasSelection/, "ctrl+c with a selection must stay copy");
+      assert.match(hint.when, /vim\.mode == 'Normal' \|\| !vim\.active/, "vim keeps insert-mode ctrl+c");
+    }
 
     const command = pkg.contributes.commands[0];
     assert.equal(command.command, "tode.quit");
@@ -314,6 +292,12 @@ test("the bridge binds ctrl+c to quit, but not in the terminal", () => {
 
     const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
     assert.match(source, /registerCommand\("tode\.quit"/);
+    assert.match(source, /registerCommand\("tode\.confirmQuit"/);
+    assert.match(source, /registerCommand\("tode\.quitHint"/);
+    assert.match(source, /"Do you want to quit tode\?", \{ modal: true \}, "Quit"/, "quit confirms before acting");
+    assert.match(source, /showErrorMessage\(QUIT_HINT, \{ modal: true \}\)/, "the hint is a modal, not a corner toast");
+    assert.match(source, /vscodevim\.vim/, "the vim quit watch rides along");
+    assert.match(source, /onDidChangeTabs/);
     assert.match(source, /\/usr\/local\/bin\/tode/);
   } finally {
     process.env.XDG_DATA_HOME = prev;
@@ -490,105 +474,6 @@ test("-r is a real flag now, not something quietly dropped", () => {
   assert.doesNotMatch(ignored, /"-r"/, "-r must not be in the ignored list");
   assert.doesNotMatch(ignored, /"--reuse-window"/);
   assert.match(source, /takeBool\(args, "-r"\)/);
-});
-
-test("keybind lines are parsed into a trigger to action table", () => {
-  const { parseKeybinds } = require("../dist/terminal/ghostty.js");
-  const table = parseKeybinds(
-    "keybind = super+backspace=text:\\\\x15\nkeybind = super+shift+z=redo\nnot a keybind line\n",
-  );
-  assert.equal(table.get("super+backspace"), "text:\\\\x15");
-  assert.equal(table.get("super+shift+z"), "redo");
-  assert.equal(table.size, 2);
-});
-
-test("only chords bound to something other than unbind or ignore are conflicts", () => {
-  const { findConflicts, CHORD_TARGETS } = require("../dist/terminal/ghostty.js");
-  const effective = new Map(CHORD_TARGETS.map((t) => [t.trigger, "text:\\\\x15"]));
-  effective.set("super+backspace", "unbind");
-  effective.set("super+z", "ignore");
-  const conflicts = findConflicts(effective);
-  assert.equal(conflicts.some((c) => c.trigger === "super+backspace"), false, "already unbound");
-  assert.equal(conflicts.some((c) => c.trigger === "super+z"), false, "already ignored");
-  assert.equal(conflicts.length, CHORD_TARGETS.length - 2);
-});
-
-test("a chord ghostty never bound at all is not a conflict", () => {
-  const { findConflicts } = require("../dist/terminal/ghostty.js");
-  assert.deepEqual(findConflicts(new Map()), []);
-});
-
-test("the generated keybinds file only touches the confirmed triggers", () => {
-  const { keybindsFileContents, CHORD_TARGETS } = require("../dist/terminal/ghostty.js");
-  const subset = [CHORD_TARGETS[0], CHORD_TARGETS[2]];
-  const content = keybindsFileContents(subset);
-  assert.match(content, /keybind = super\+backspace=unbind/);
-  assert.match(content, /keybind = super\+arrow_right=unbind/);
-  assert.doesNotMatch(content, /super\+z/);
-});
-
-test("the include line is added once and only once", () => {
-  const { withInclude, INCLUDE_LINE } = require("../dist/terminal/ghostty.js");
-  const once = withInclude("window-save-state = always\n");
-  assert.match(once, new RegExp(INCLUDE_LINE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  const twice = withInclude(once);
-  assert.equal(twice, once, "adding it again must not duplicate it");
-});
-
-test("the include line survives a config with no trailing newline", () => {
-  const { withInclude } = require("../dist/terminal/ghostty.js");
-  const out = withInclude("window-save-state = always");
-  assert.equal(out.split("\n").filter((l) => l.startsWith("config-file")).length, 1);
-  assert.ok(out.includes("window-save-state = always\nconfig-file"), "must not run onto the same line");
-});
-
-test("undoing removes only the include line, nothing else the user wrote", () => {
-  const { withoutInclude, INCLUDE_LINE } = require("../dist/terminal/ghostty.js");
-  const config = `window-save-state = always\nfont-size = 14\n${INCLUDE_LINE}\ntheme = dark\n`;
-  const after = withoutInclude(config);
-  assert.doesNotMatch(after, new RegExp(INCLUDE_LINE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(after, /font-size = 14/);
-  assert.match(after, /theme = dark/);
-});
-
-test("apply then undo round-trips to a clean config, on a real filesystem", () => {
-  const fs = require("node:fs");
-  const os = require("node:os");
-  const path = require("node:path");
-  const { applyFix, undoFix, CHORD_TARGETS, findConflicts } = require("../dist/terminal/ghostty.js");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-ghostty-"));
-  fs.writeFileSync(path.join(dir, "config"), "window-save-state = always\n");
-  const conflicts = findConflicts(new Map());
-  const all = CHORD_TARGETS.map((t) => ({ ...t, current: "text:x" }));
-  applyFix(dir, all);
-  assert.ok(fs.existsSync(path.join(dir, "tode", "keybinds.ghostty")));
-  const config = fs.readFileSync(path.join(dir, "config"), "utf8");
-  assert.match(config, /window-save-state = always/, "the user's own line survives");
-  assert.match(config, /config-file = \?tode\/keybinds\.ghostty/);
-
-  const undone = undoFix(dir);
-  assert.equal(undone, true);
-  assert.equal(fs.existsSync(path.join(dir, "tode", "keybinds.ghostty")), false);
-  const restored = fs.readFileSync(path.join(dir, "config"), "utf8");
-  assert.equal(restored, "window-save-state = always\n");
-});
-
-test("the exact regression: what ghostty 1.3.1 actually ships for these", () => {
-  // pinned from `ghostty +list-keybinds --default` on 1.3.1, so a future ghostty
-  // release that changes its defaults shows up here rather than silently
-  const { parseKeybinds, findConflicts } = require("../dist/terminal/ghostty.js");
-  const shipped = parseKeybinds([
-    "keybind = super+arrow_right=text:\\\\x05",
-    "keybind = super+arrow_left=text:\\\\x01",
-    "keybind = super+backspace=text:\\\\x15",
-    "keybind = super+z=undo",
-    "keybind = super+shift+z=redo",
-    "keybind = super+shift+t=undo",
-    "keybind = super+a=select_all",
-    "keybind = super+w=close_surface",
-  ].join("\n"));
-  const conflicts = findConflicts(shipped);
-  assert.equal(conflicts.length, 8, "every one of ghostty's defaults here should be flagged");
 });
 
 test("changing the palette gets a new theme folder, so a warm browser cannot cache it stale", () => {

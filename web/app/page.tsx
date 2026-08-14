@@ -15,7 +15,7 @@ export default function Home() {
         <div className="grid gap-8 pt-16 pb-14 sm:grid-cols-[64px_1fr] sm:pt-24 sm:pb-16">
           <div className="hidden sm:block" aria-hidden />
           <div>
-            <h1 className="max-w-[18ch] text-[27px] leading-[1.22] font-medium tracking-[-0.02em] text-text sm:text-[34px]">
+            <h1 className="text-[20px] leading-[1.22] font-medium tracking-[-0.02em] text-text sm:text-[26px] sm:whitespace-nowrap">
               VS Code inside your{" "}
               <span className="keyword">
                 terminal
@@ -29,20 +29,23 @@ export default function Home() {
           </div>
         </div>
 
-        {/* the demo runs wider than the text column */}
-        <VideoPlayer
-          dark={{
-            src: "/demo-dark.mp4",
-            poster: "/demo-dark-poster.webp",
-            durationHint: 7.07,
-          }}
-          light={{
-            src: "/demo-light.mp4",
-            poster: "/demo-light-poster.webp",
-            durationHint: 8.23,
-          }}
-          ratio="1600 / 1076"
-        />
+        {/* the demo sits in the same column as the text, indent and all */}
+        <div className="grid gap-8 sm:grid-cols-[64px_1fr]">
+          <div className="hidden sm:block" aria-hidden />
+          <VideoPlayer
+            dark={{
+              src: "/demo-dark.mp4",
+              poster: "/demo-dark-poster.webp",
+              durationHint: 7.07,
+            }}
+            light={{
+              src: "/demo-light.mp4",
+              poster: "/demo-light-poster.webp",
+              durationHint: 8.23,
+            }}
+            ratio="1600 / 1076"
+          />
+        </div>
 
         <div className="grid gap-6 pt-12 sm:grid-cols-[64px_1fr] sm:gap-8 sm:pt-14">
           <div className="hidden sm:block" aria-hidden />

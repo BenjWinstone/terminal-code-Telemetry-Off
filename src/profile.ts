@@ -1,19 +1,21 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { CSS_FILE } from "./codeserver/server";
-import { injectedCss } from "./codeserver/inject";
+import { FONT_FALLBACKS, injectedCss } from "./codeserver/inject";
 import { parseJsonc, readKey, setKeys } from "./jsonc";
 import { DATA_DIR } from "./runtime/paths";
+import { claimBindings, fallbackBindings, hintBindings, overrideBindings, quitBindings } from "./shortcuts/store";
 import { queryTerminal, withFallbacks } from "./terminal/osc";
 import type { TerminalPalette } from "./terminal/osc";
 import { hex, legible, mix } from "./theme/color";
 import {
   THEME_NAME,
   generateTheme,
-  liveSettings,
   paletteFingerprint,
+  themeFingerprint,
   semanticColors,
   surfaces,
 } from "./theme/generate";
@@ -21,7 +23,7 @@ import {
 export const VSCODE_DIR = path.join(DATA_DIR, "vscode");
 export const USER_DIR = path.join(VSCODE_DIR, "user-data", "User");
 export const EXTENSIONS_DIR = path.join(VSCODE_DIR, "extensions");
-const THEME_EXTENSION_ID = "tode.tode-theme";
+export const THEME_EXTENSION_ID = "tode.tode-theme";
 
 /** code-server serves extension resources with a year-long cache-control, on the
  * assumption that a given (id, version, path) never changes its bytes — true for
@@ -50,8 +52,7 @@ function forgetOldThemeExtensions(keep: string): void {
   }
 }
 const PALETTE_CACHE = path.join(DATA_DIR, "palette.json");
-export const LIVE_SETTINGS_FILE = path.join(DATA_DIR, "live-settings.json");
-export const LIVE_COLORS_FILE = path.join(DATA_DIR, "live-colors.raw.json");
+export const LIVE_THEME_FILE = path.join(DATA_DIR, "live-theme.json");
 
 export const FONT_FAMILY = "JetBrains Mono";
 const FONT_FILE = "JetBrainsMono-Regular.ttf";
@@ -68,11 +69,27 @@ export function assetPath(name: string): string {
  * font has to actually be installed before vscode can use it. */
 export const FONT_ASSET = FONT_FILE;
 
+function userFontsDir(): string {
+  if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Fonts");
+  const dataHome =
+    process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME)
+      ? process.env.XDG_DATA_HOME
+      : path.join(os.homedir(), ".local", "share");
+  return path.join(dataHome, "fonts");
+}
+
 export function ensureFont(): "installed" | "present" {
-  const target = path.join(os.homedir(), "Library", "Fonts", FONT_FILE);
+  const target = path.join(userFontsDir(), FONT_FILE);
   if (fs.existsSync(target)) return "present";
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.copyFileSync(assetPath(FONT_FILE), target);
+  if (process.platform !== "darwin") {
+    // fontconfig only sees a new file after its cache moves; best effort, the
+    // workbench chrome gets the same font over http either way
+    try {
+      execFileSync("fc-cache", ["-f", path.dirname(target)], { stdio: "ignore" });
+    } catch {}
+  }
   return "installed";
 }
 
@@ -116,16 +133,33 @@ function writeIfChanged(file: string, contents: string): boolean {
   return true;
 }
 
+/** A vscode theme document — the shape generateTheme produces, and the shape
+ * an actual theme file on disk parses to. Everything downstream of generation
+ * speaks this, which is what lets a file and an inline theme travel the same
+ * road. */
+export interface ThemeDocument {
+  name?: string;
+  type?: string;
+  colors?: Record<string, string>;
+  tokenColors?: unknown[];
+  semanticHighlighting?: boolean;
+}
+
+export function installTheme(palette: TerminalPalette): { changed: boolean; fingerprint: string } {
+  return installThemeJson(generateTheme(palette), paletteFingerprint(palette));
+}
+
 /** A contributed theme rather than colorCustomizations, so it shows up as a real
  * theme and can carry token colours instead of only workbench ones. */
-export function installTheme(palette: TerminalPalette): { changed: boolean; fingerprint: string } {
-  const fingerprint = paletteFingerprint(palette);
+export function installThemeJson(
+  theme: ThemeDocument,
+  fingerprint: string,
+): { changed: boolean; fingerprint: string } {
   const dir = themeExtensionDir(fingerprint);
-  // this exact fingerprint already has a folder, so the palette has not moved
+  // this exact fingerprint already has a folder, so the theme has not moved
   // and there is nothing to regenerate or re-register
   const already = fs.existsSync(path.join(dir, "themes", "tode-terminal.json"));
   if (!already) {
-    const theme = generateTheme(palette);
     const manifest = {
       name: `tode-theme-${fingerprint}`,
       displayName: "tode terminal theme",
@@ -137,7 +171,7 @@ export function installTheme(palette: TerminalPalette): { changed: boolean; fing
         themes: [
           {
             label: THEME_NAME,
-            uiTheme: theme.type === "dark" ? "vs-dark" : "vs",
+            uiTheme: theme.type === "light" ? "vs" : "vs-dark",
             path: "./themes/tode-terminal.json",
           },
         ],
@@ -214,13 +248,15 @@ export function registerThemeExtension(dir?: string): void {
   fs.writeFileSync(manifest, `${JSON.stringify([...without, entry], null, 2)}\n`);
 }
 
+const FONT_STACK = `"${FONT_FAMILY}", ${FONT_FALLBACKS}`;
+
 const SETTINGS: Record<string, unknown> = {
   "workbench.colorTheme": THEME_NAME,
-  "editor.fontFamily": `"${FONT_FAMILY}", Menlo, monospace`,
-  "terminal.integrated.fontFamily": `"${FONT_FAMILY}", Menlo, monospace`,
-  "chat.editor.fontFamily": `"${FONT_FAMILY}", Menlo, monospace`,
-  "debug.console.fontFamily": `"${FONT_FAMILY}", Menlo, monospace`,
-  "markdown.preview.fontFamily": `"${FONT_FAMILY}", Menlo, monospace`,
+  "editor.fontFamily": FONT_STACK,
+  "terminal.integrated.fontFamily": FONT_STACK,
+  "chat.editor.fontFamily": FONT_STACK,
+  "debug.console.fontFamily": FONT_STACK,
+  "markdown.preview.fontFamily": FONT_STACK,
   "terminal.integrated.enableImages": true,
   "workbench.startupEditor": "none",
   // the chat view lives in the secondary side bar, which opens itself for a
@@ -231,11 +267,13 @@ const SETTINGS: Record<string, unknown> = {
   "workbench.welcomePage.walkthroughs.openOnInstall": false,
   "window.commandCenter": false,
   "workbench.layoutControl.enabled": false,
-  "editor.cursorBlinking": "solid",
+  // The default title format ends in ${appName} — "code-server". The folder is
+  // already on the window above this bar, so the file name is the only part
+  // left worth showing. ${dirty} puts a dot in front of unsaved work.
+  "window.title": "${dirty}${activeEditorShort}",
   "editor.smoothScrolling": false,
   "workbench.list.smoothScrolling": false,
   "terminal.integrated.smoothScrolling": false,
-  "editor.minimap.enabled": false,
   "update.mode": "none",
   "telemetry.telemetryLevel": "off",
   "workbench.enableExperiments": false,
@@ -249,6 +287,11 @@ const SEEDED: Record<string, unknown> = {
   "workbench.activityBar.location": "top",
   "editor.fontSize": 13,
   "workbench.tree.indent": 12,
+  // tode's taste, not tode's requirements: an import or a hand edit wins
+  "editor.cursorBlinking": "solid",
+  "editor.minimap.enabled": false,
+  // changed files as a tree reads like the project does
+  "scm.defaultViewMode": "tree",
 };
 
 /** The proxy reads this on each document, so a palette change reaches the page
@@ -271,15 +314,34 @@ export function installCss(palette: TerminalPalette): boolean {
   );
 }
 
-/** Every open tode bridge instance watches this file and applies whatever it
- * finds through the settings API, which is what makes a change reflect without
- * a reload — the contributed theme extension only takes effect on the next
- * one. Written on every open as well as on a live change, so a fresh window
- * gets full fidelity immediately rather than waiting on the next terminal
- * colour change to arrive. */
-export function installLiveSettings(palette: TerminalPalette): boolean {
-  const settings = liveSettings(palette);
-  return writeIfChanged(LIVE_SETTINGS_FILE, `${JSON.stringify(settings)}\n`);
+/** The live slot holds a whole vscode theme document. Every open tode bridge
+ * instance watches it and applies the theme's colours through the settings
+ * API, which is what makes a change reflect without a reload — the contributed
+ * theme extension only takes effect on the next one. Written on every open as
+ * well as on a live change, so a fresh window gets full fidelity immediately
+ * rather than waiting on the next terminal colour change to arrive. */
+export function setLiveTheme(theme: ThemeDocument): boolean {
+  return writeIfChanged(LIVE_THEME_FILE, `${JSON.stringify(theme)}\n`);
+}
+
+/** An actual vscode theme file becomes the editor theme: installed as the
+ * contributed theme so the next load has it, and dropped into the live slot so
+ * the window already open takes it without a reload. Theme files ship with
+ * comments and trailing commas, so jsonc. Returns what went wrong, or null. */
+export function setThemeFile(file: string): string | null {
+  let source: string;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch {
+    return `could not read ${file}`;
+  }
+  const theme = parseJsonc<ThemeDocument>(source);
+  if (!theme || typeof theme !== "object" || (!theme.colors && !theme.tokenColors)) {
+    return `${file} is not a vscode theme (expected a json document with colors or tokenColors)`;
+  }
+  installThemeJson(theme, themeFingerprint(theme));
+  setLiveTheme(theme);
+  return null;
 }
 
 export function managedSettings(): Record<string, unknown> {
@@ -304,45 +366,11 @@ export function installSettings(): boolean {
   return writeIfChanged(file, applySettings(source || "{}"));
 }
 
-/** Ctrl chords the terminal always delivers, added alongside the cmd chords
- * vscode already binds, so both reach the same command. Plain ctrl+letter stops
- * at the integrated terminal, where those belong to the shell. */
-/** Deliberately short. A plain ctrl+letter is worth more to vim, emacs bindings
- * and the shell than it is as a second way to reach a command that already has a
- * cmd chord, so only the ones nothing else wants are taken.
- *
- * Left alone on purpose: a and e (line ends), b and f (page and character
- * motion), d and u (half page), n and p (completion and history), w (windows and
- * delete word), k (delete to end), r (reverse search), o and i (jump list),
- * v (visual and paste). */
-const CTRL_ALIASES: { key: string; command: string; vimWants?: boolean }[] = [
-  // vim binds ctrl+p itself, so it only reaches quick open where vim is not running
-  { key: "ctrl+p", command: "workbench.action.quickOpen", vimWants: true },
-  { key: "ctrl+s", command: "workbench.action.files.save" },
-  { key: "ctrl+j", command: "workbench.action.togglePanel" },
-  { key: "ctrl+/", command: "editor.action.commentLine" },
-];
-
-const CTRL_CHORDS: [string, string][] = [
-  ["ctrl+shift+p", "workbench.action.showCommands"],
-  ["ctrl+shift+f", "workbench.action.findInFiles"],
-  ["ctrl+shift+e", "workbench.view.explorer"],
-  ["ctrl+shift+g", "workbench.view.scm"],
-  ["ctrl+shift+d", "workbench.view.debug"],
-  ["ctrl+shift+x", "workbench.view.extensions"],
-  ["ctrl+shift+m", "workbench.actions.view.problems"],
-  ["ctrl+shift+o", "workbench.action.gotoSymbol"],
-  ["ctrl+shift+k", "editor.action.deleteLines"],
-  ["ctrl+shift+z", "redo"],
-  ["ctrl+`", "workbench.action.terminal.toggleTerminal"],
-  ["ctrl+,", "workbench.action.openSettings"],
-];
-
-/** Panes, on opt. The workbench keymap is the Linux one, so ctrl+1..8 already
- * focus editor groups — but ctrl belongs to the shell in a terminal pane, and
- * focusing a pane is mostly something you do from another pane. Opt is free on
- * both sides, so these are bound without a !terminalFocus guard: the chord has
- * to work from wherever you happen to be.
+/** Panes, on opt. The workbench's own group-focus chords sit on the platform
+ * modifier (cmd or ctrl plus a digit), which a terminal pane cannot always
+ * spare — and focusing a pane is mostly something you do from another pane.
+ * Opt is free on both sides, so these are bound without a !terminalFocus
+ * guard: the chord has to work from wherever you happen to be.
  *
  * The cost is opt+w, which readline and emacs read as copy. Add a
  * "!terminalFocus" when clause to that one entry if the shell needs it back. */
@@ -361,79 +389,22 @@ const PANE_CHORDS: [string, string][] = [
   ["alt+w", "workbench.action.closeEditorsInGroup"],
 ];
 
-/** Terminals tend to swallow cmd, so every cmd chord is offered on ctrl too.
- * The mirror is generated rather than listed, so anything imported gets one. */
-const NOT_MIRRORED = new Set([
-  // a modal editor and the shell own the bare ctrl+letter chords
-  // and these already mean something on ctrl in vscode for macos
-  "tab",
-  "space",
-  "`",
-  "-",
-  "=",
-  // cursor motion is not the same idea on each side
-  "left",
-  "right",
-  "up",
-  "down",
-  "home",
-  "end",
-  "pageup",
-  "pagedown",
-  "backspace",
-  "delete",
-]);
-
-export function mirrorKey(key: string): string | null {
-  const parts = key.trim().toLowerCase().split(/\s+/)[0].split("+");
-  if (!parts.includes("cmd") && !parts.includes("meta")) return null;
-  if (parts.includes("ctrl")) return null;
-  const base = parts[parts.length - 1];
-  if (NOT_MIRRORED.has(base)) return null;
-  const onlyModifier = parts.length === 2;
-  if (onlyModifier && /^[a-z]$/.test(base)) return null;
-  // a chord such as "cmd+k cmd+s" would need both halves rewritten; leave it
-  if (key.trim().includes(" ")) return null;
-  return parts.map((part) => (part === "cmd" || part === "meta" ? "ctrl" : part)).join("+");
-}
-
-interface MirrorSource {
-  key?: string;
-  command?: string;
-  when?: string;
-}
-
-export function ctrlMirrors(bindings: MirrorSource[]): MirrorSource[] {
-  const made: MirrorSource[] = [];
-  const seen = new Set<string>();
-  for (const binding of bindings) {
-    if (!binding.key || !binding.command) continue;
-    // a leading minus removes a binding rather than adding one, and mirroring a
-    // removal only risks cancelling something on the ctrl side
-    if (binding.command.startsWith("-")) continue;
-    const key = mirrorKey(binding.key);
-    if (!key) continue;
-    const signature = `${key} ${binding.command} ${binding.when ?? ""}`;
-    if (seen.has(signature)) continue;
-    seen.add(signature);
-    made.push({ ...binding, key });
-  }
-  return made;
-}
-
+/** The pane chords, then whatever the shortcut wizard decided belongs on the
+ * editor side. There is deliberately no blanket cmd-to-ctrl transformation any
+ * more: which chords need help differs per terminal and per user, and the
+ * wizard (tode shortcuts) is where that gets decided, one chord at a time. */
 export function todeKeybindings(): unknown[] {
   return [
-    ...CTRL_ALIASES.map(({ key, command, vimWants }) => ({
-      key,
-      command,
-      when: vimWants ? "!terminalFocus && !vim.active" : "!terminalFocus",
-    })),
-    ...CTRL_CHORDS.map(([key, command]) => ({ key, command })),
     ...PANE_CHORDS.map(([key, command]) => ({ key, command })),
+    ...quitBindings(),
+    ...hintBindings(),
+    ...fallbackBindings().map(({ key, command, when }) =>
+      when ? { key, command, when } : { key, command },
+    ),
   ];
 }
 
-interface Binding {
+export interface Binding {
   key?: string;
   command?: string;
   when?: string;
@@ -457,49 +428,42 @@ function readBindings(file: string): Binding[] {
   }
 }
 
-/** Rewrites only the entries tode owns. Anything else in the file, whether it
- * was imported or written by hand, is carried across untouched — including
- * entries that used to be tode's and no longer are. */
-export function installKeybindings(): boolean {
-  const mine = todeKeybindings() as Binding[];
+/** The entries in keybindings.json that are not tode's: imported or written
+ * by hand. Also what the wizard's import-conflict scan reads. */
+export function foreignBindings(): Binding[] {
+  const mine = [...(todeKeybindings() as Binding[]), ...overrideBindings(), ...claimBindings()];
   const previouslyMine = readBindings(KEYBINDINGS_RECORD);
-  const theirs = readBindings(KEYBINDINGS_FILE).filter(
+  return readBindings(KEYBINDINGS_FILE).filter(
     (entry) =>
       !previouslyMine.some((old) => sameBinding(old, entry)) &&
       !mine.some((current) => sameBinding(current, entry)),
   );
-  return writeBindings(mine, theirs);
 }
 
-/** Writes the file as tode's chords, then yours, then a ctrl mirror of every cmd
- * chord among them that does not collide with something else. */
+/** Rewrites only the entries tode owns. Anything else in the file, whether it
+ * was imported or written by hand, is carried across untouched — including
+ * entries that used to be tode's and no longer are. */
+export function installKeybindings(): boolean {
+  return writeBindings(todeKeybindings() as Binding[], foreignBindings());
+}
+
+/** Writes the file as tode's chords, then yours, then the chords the wizard
+ * decided must win over an import — vscode reads the file bottom-up. */
 function writeBindings(mine: Binding[], theirs: Binding[]): boolean {
-  const mirrors = ctrlMirrors(theirs).filter(
-    (mirror) =>
-      !mine.some((entry) => entry.key === mirror.key) &&
-      !theirs.some((entry) => sameBinding(entry, mirror)),
-  );
+  const winners = [...overrideBindings(), ...claimBindings()];
   fs.mkdirSync(USER_DIR, { recursive: true });
   fs.mkdirSync(path.dirname(KEYBINDINGS_RECORD), { recursive: true });
-  // the mirrors are recorded alongside tode's own entries so the next write
-  // regenerates them instead of treating last time's as something you wrote
-  fs.writeFileSync(KEYBINDINGS_RECORD, `${JSON.stringify([...mine, ...mirrors], null, 2)}\n`);
+  fs.writeFileSync(KEYBINDINGS_RECORD, `${JSON.stringify([...mine, ...winners], null, 2)}\n`);
   return writeIfChanged(
     KEYBINDINGS_FILE,
-    `// tode's ctrl chords, then yours, then a ctrl mirror of each cmd chord\n${JSON.stringify([...mine, ...theirs, ...mirrors], null, 2)}\n`,
+    `// tode's chords, then yours, then what tode shortcuts decided must win\n${JSON.stringify([...mine, ...theirs, ...winners], null, 2)}\n`,
   );
 }
 
 /** Adds imported bindings to whatever is already there, keeping tode's on top. */
 export function mergeKeybindings(theirs: Binding[]): number {
-  const mine = todeKeybindings() as Binding[];
-  const previouslyMine = readBindings(KEYBINDINGS_RECORD);
-  const existing = readBindings(KEYBINDINGS_FILE).filter(
-    (entry) =>
-      !previouslyMine.some((old) => sameBinding(old, entry)) &&
-      !mine.some((current) => sameBinding(current, entry)),
-  );
+  const existing = foreignBindings();
   const added = theirs.filter((entry) => !existing.some((have) => sameBinding(have, entry)));
-  writeBindings(mine, [...existing, ...added]);
+  writeBindings(todeKeybindings() as Binding[], [...existing, ...added]);
   return added.length;
 }

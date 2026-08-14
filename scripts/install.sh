@@ -8,6 +8,8 @@ PLATFORMS="__PLATFORMS__"
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) TARGET=darwin-arm64 ;;
+  Linux-x86_64|Linux-amd64) TARGET=linux-x64 ;;
+  Linux-aarch64|Linux-arm64) TARGET=linux-arm64 ;;
   *)
     echo "tode does not support $(uname -s) $(uname -m) yet" >&2
     exit 1
@@ -61,6 +63,24 @@ mkdir -p "$BIN_HOME"
 cp "$APP/bin/tode" "$BIN_HOME/tode"
 chmod +x "$BIN_HOME/tode"
 
+# the vendored electron needs the usual chromium system libraries; say which
+# ones are missing rather than failing later with a loader error
+if [ "$(uname -s)" = Linux ]; then
+  MISSING="$(ldd "$APP/vendor/terminal-browser/electron/electron" 2>/dev/null | awk '/not found/{print $1}' | sort -u || true)"
+  if [ -n "$MISSING" ]; then
+    echo "warning: missing system libraries:" >&2
+    printf '  %s\n' $MISSING >&2
+    echo "  sudo apt-get install libnss3 libgtk-3-0 libasound2t64 libgbm1" >&2
+  fi
+fi
+
+# code-server is too big to ride inside every release tarball, so the freshly
+# installed tode fetches the pinned build now — the install is complete when
+# this script says it is
+if ! "$BIN_HOME/tode" provision; then
+  echo "warning: could not fetch code-server — tode will retry on first open" >&2
+fi
+
 mkdir -p "$STATE_HOME/tode"
 cat > "$STATE_HOME/tode/install.json" <<EOF
 {
@@ -75,6 +95,17 @@ EOF
 echo
 echo "tode $VERSION -> $APP"
 echo "shim  $BIN_HOME/tode"
+
+# stdin is the install script itself under curl | bash, so the wizard talks to
+# the terminal directly; a headless install just skips the offer
+if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  printf '\nConfigure shortcuts to work well in tode (recommended)? [Y/n] ' > /dev/tty
+  IFS= read -r WANTS_SHORTCUTS < /dev/tty || WANTS_SHORTCUTS=n
+  case "$WANTS_SHORTCUTS" in
+    [nN]*) echo "you can run it any time with: tode shortcuts" > /dev/tty ;;
+    *) "$BIN_HOME/tode" shortcuts --no-boot < /dev/tty > /dev/tty 2>&1 || true ;;
+  esac
+fi
 
 case ":$PATH:" in
   *":$BIN_HOME:"*)

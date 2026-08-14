@@ -82,24 +82,9 @@ export class CdpSession {
   }
 }
 
-/** vscode for the web reads nothing but the user agent string to decide which
- * platform it is on, and that decision picks its whole keymap. Telling it linux
- * is what puts quick open on ctrl+p instead of a cmd chord the terminal eats. */
+/** The workbench reads the user agent (and userAgentData) to pick its keymap.
+ * tode no longer masquerades — each platform gets its native keymap and the
+ * shortcut wizard settles the terminal's side — but the keymap generator
+ * still wears this to dump the linux table from a mac. */
 export const LINUX_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
-
-export async function navigateAsLinux(port: number, url: string): Promise<void> {
-  const target = await pageTarget(port);
-  const session = await CdpSession.connect(target.webSocketDebuggerUrl!);
-  try {
-    await session.send("Page.enable");
-    await session.send("Emulation.setUserAgentOverride", {
-      userAgent: LINUX_USER_AGENT,
-      platform: "Linux x86_64",
-      acceptLanguage: "en-US",
-    });
-    await session.send("Page.navigate", { url });
-  } finally {
-    session.close();
-  }
-}

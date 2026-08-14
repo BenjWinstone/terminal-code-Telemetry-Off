@@ -8,7 +8,7 @@ import { BROWSER_HOME, RUNTIME_DIR, VENDOR_DIR } from "./paths";
 /** The terminal-browser build tode is written against. tode drives flags whose
  * behaviour is specific to this build, so it pins rather than taking whatever
  * happens to be installed. */
-export const PINNED_VERSION = "main-e6eca1e";
+export const PINNED_VERSION = "app-mode-5b99b0b";
 
 const RELEASE_ORIGIN = process.env.TODE_RELEASE_ORIGIN ?? "https://terminal-browser.sh/install";
 
@@ -28,6 +28,14 @@ export interface Release {
 
 export type Source = "override" | "vendored" | "pinned" | "cloned" | "downloaded";
 
+/** The platform-arch pair release tables are keyed by, here and on tode's own
+ * release worker. One computation, shared by everything that picks a build. */
+export function targetTriple(): string {
+  return `${process.platform === "darwin" ? "darwin" : "linux"}-${
+    process.arch === "arm64" ? "arm64" : "x64"
+  }`;
+}
+
 /** The copy that ships inside the release. A normal install always resolves
  * here, so the first run costs no download and needs no network. */
 const VENDORED = path.join(VENDOR_DIR, "terminal-browser");
@@ -39,8 +47,9 @@ export interface Runtime {
   source: Source;
 }
 
-/** The pinned installer carries the download url and its hash, so asking for one
- * version is enough to fetch it and know the bytes are the right ones. */
+/** The pinned installer carries a per-platform table of download urls and their
+ * hashes, so asking for one version is enough to fetch the right build and know
+ * the bytes are the right ones. */
 export async function lookup(version: string): Promise<Release> {
   const url = `${RELEASE_ORIGIN}/v/${version}`;
   const response = await fetch(url);
@@ -51,12 +60,18 @@ export async function lookup(version: string): Promise<Release> {
     if (!found) throw new Error(`release ${version} did not report ${name}`);
     return found[1];
   };
+  const target = targetTriple();
+  const row = field("PLATFORMS")
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .find((columns) => columns[0] === target);
+  if (!row || row.length < 4) throw new Error(`release ${version} has no build for ${target}`);
   return {
     version: field("VERSION"),
     channel: field("CHANNEL"),
-    url: field("DOWNLOAD_URL"),
-    sha256: field("SHA256"),
-    size: Number(field("SIZE")),
+    url: row[1],
+    sha256: row[2],
+    size: Number(row[3]),
   };
 }
 
@@ -68,11 +83,19 @@ function versionAt(root: string): string | null {
   }
 }
 
+/** Where the electron binary lives inside a terminal-browser tree. macOS ships
+ * an app bundle; linux ships the bare electron layout. */
+export function electronEntry(root: string): string {
+  return process.platform === "darwin"
+    ? path.join(root, "electron", "terminal-browser.app", "Contents", "MacOS", "terminal-browser")
+    : path.join(root, "electron", "electron");
+}
+
 function usable(root: string, version: string): boolean {
   return (
     versionAt(root) === version &&
     fs.existsSync(path.join(root, "cli", "dist", "main.js")) &&
-    fs.existsSync(path.join(root, "electron", "terminal-browser.app"))
+    fs.existsSync(electronEntry(root))
   );
 }
 
@@ -86,19 +109,25 @@ function rootFor(version: string): string {
 function writeLauncher(root: string) {
   const bin = path.join(root, "bin", "terminal-browser");
   const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+  const electron = path.relative(root, electronEntry(root));
+  // the scroll helper only ships in the macOS build; exporting a path that is
+  // not there would make terminal-browser try it anyway
+  const scrollHelper =
+    process.platform === "darwin"
+      ? `export NATIVE_SCROLL_HELPER="\${NATIVE_SCROLL_HELPER:-$ROOT/bin/native-scroll-helper}"\n`
+      : "";
   fs.writeFileSync(
     bin,
     `#!/bin/sh
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 export TERMINAL_BROWSER_DIST_ROOT="$ROOT"
 export ELECTRON_RUN_AS_NODE=1
-export NATIVE_SCROLL_HELPER="\${NATIVE_SCROLL_HELPER:-$ROOT/bin/native-scroll-helper}"
-export XDG_DATA_HOME=\${TODE_BROWSER_DATA:-${quote(BROWSER_HOME.data)}}
+${scrollHelper}export XDG_DATA_HOME=\${TODE_BROWSER_DATA:-${quote(BROWSER_HOME.data)}}
 export XDG_STATE_HOME=\${TODE_BROWSER_STATE:-${quote(BROWSER_HOME.state)}}
 export XDG_CACHE_HOME=\${TODE_BROWSER_CACHE:-${quote(BROWSER_HOME.cache)}}
 export XDG_RUNTIME_DIR=\${TODE_BROWSER_RUN:-${quote(BROWSER_HOME.runtime)}}
 export TERMINAL_BROWSER_APPDATA=\${TODE_BROWSER_APPDATA:-${quote(BROWSER_HOME.appData)}}
-exec "$ROOT/electron/terminal-browser.app/Contents/MacOS/terminal-browser" "$ROOT/cli/dist/main.js" "$@"
+exec "$ROOT/${electron}" "$ROOT/cli/dist/main.js" "$@"
 `,
   );
   fs.chmodSync(bin, 0o755);
@@ -106,7 +135,7 @@ exec "$ROOT/electron/terminal-browser.app/Contents/MacOS/terminal-browser" "$ROO
   return bin;
 }
 
-function unpack(tarball: string, root: string) {
+export function unpack(tarball: string, root: string) {
   const staging = `${root}.unpacking`;
   fs.rmSync(staging, { recursive: true, force: true });
   fs.mkdirSync(staging, { recursive: true });
@@ -137,13 +166,20 @@ function cloneTree(from: string, to: string): boolean {
   return true;
 }
 
-async function download(release: Release, onProgress?: (fraction: number) => void): Promise<string> {
-  const response = await fetch(release.url);
+/** Streams a url to disk while hashing it, and refuses the file when the bytes
+ * are not the ones the release table promised. */
+export async function fetchVerified(
+  url: string,
+  sha256: string,
+  size: number,
+  tarball: string,
+  onProgress?: (fraction: number) => void,
+): Promise<string> {
+  const response = await fetch(url);
   if (!response.ok || !response.body) {
-    throw new Error(`download failed (${response.status} from ${release.url})`);
+    throw new Error(`download failed (${response.status} from ${url})`);
   }
-  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
-  const tarball = path.join(RUNTIME_DIR, `${release.version}.tar.gz`);
+  fs.mkdirSync(path.dirname(tarball), { recursive: true });
   const hash = crypto.createHash("sha256");
   const file = fs.createWriteStream(tarball);
   let read = 0;
@@ -151,17 +187,22 @@ async function download(release: Release, onProgress?: (fraction: number) => voi
     hash.update(chunk);
     read += chunk.byteLength;
     if (!file.write(chunk)) await new Promise<void>((resolve) => file.once("drain", () => resolve()));
-    if (release.size) onProgress?.(read / release.size);
+    if (size) onProgress?.(read / size);
   }
   await new Promise<void>((resolve, reject) => {
     file.end((error?: Error | null) => (error ? reject(error) : resolve()));
   });
   const got = hash.digest("hex");
-  if (got !== release.sha256) {
+  if (got !== sha256) {
     fs.rmSync(tarball, { force: true });
-    throw new Error(`download corrupted: expected ${release.sha256}, got ${got}`);
+    throw new Error(`download corrupted: expected ${sha256}, got ${got}`);
   }
   return tarball;
+}
+
+function download(release: Release, onProgress?: (fraction: number) => void): Promise<string> {
+  const tarball = path.join(RUNTIME_DIR, `${release.version}.tar.gz`);
+  return fetchVerified(release.url, release.sha256, release.size, tarball, onProgress);
 }
 
 /** Ask the runtime which options it takes rather than assuming, so tode can be
@@ -186,6 +227,27 @@ export function supportedFlags(runtime: Runtime): Set<string> {
 export interface ResolveOptions {
   version?: string;
   onProgress?(stage: "cloning" | "downloading", fraction: number): void;
+}
+
+/** resolveRuntime with the download narrated on stderr, for interactive runs. */
+export async function resolveRuntimeWithProgress(): Promise<Runtime> {
+  let announced = false;
+  return resolveRuntime({
+    onProgress: (stage, fraction) => {
+      if (stage === "downloading") {
+        if (!announced) {
+          process.stderr.write(`tode: fetching terminal-browser ${PINNED_VERSION}\n`);
+          announced = true;
+        }
+        const percent = Math.round(fraction * 100);
+        process.stderr.write(`\r  ${percent}%${percent === 100 ? "\n" : ""}`);
+      }
+      if (stage === "cloning" && !announced) {
+        process.stderr.write(`tode: reusing the terminal-browser ${PINNED_VERSION} already installed\n`);
+        announced = true;
+      }
+    },
+  });
 }
 
 export async function resolveRuntime(options: ResolveOptions = {}): Promise<Runtime> {

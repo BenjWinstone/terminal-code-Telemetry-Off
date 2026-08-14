@@ -1,49 +1,22 @@
-import readline from "node:readline";
-
+import { editorIconPng } from "./appicon";
 import { describe, findEditors, summarise } from "./editors";
 import type { Editor } from "./editors";
 import { runImport } from "./run";
+import { select } from "../terminal/select";
 
 const bold = (text: string) => `\x1b[1m${text}\x1b[0m`;
 const dim = (text: string) => `\x1b[2m${text}\x1b[0m`;
 const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
 const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
 
-function ask(question: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
-
-function ago(when: number): string {
-  if (!when) return "never used";
-  const days = Math.floor((Date.now() - when) / 86_400_000);
-  if (days <= 0) return "used today";
-  if (days === 1) return "used yesterday";
-  if (days < 30) return `used ${days} days ago`;
-  return `used ${Math.floor(days / 30)} months ago`;
-}
-
+/** One row per editor, most recently used first (findEditors already sorts) —
+ * the name is the decision, so the name is all a row says. */
 async function choose(editors: Editor[]): Promise<Editor | null> {
-  process.stdout.write(`${bold("Import from which editor?")}\n\n`);
-  editors.forEach((editor, index) => {
-    const contents = describe(editor);
-    process.stdout.write(`  ${bold(String(index + 1))}  ${editor.name}\n`);
-    process.stdout.write(`     ${dim(summarise(contents))}\n`);
-    process.stdout.write(`     ${dim(ago(editor.lastUsed))}\n\n`);
-  });
-  const answer = await ask(`Pick 1-${editors.length}, or enter to cancel: `);
-  if (!answer) return null;
-  const index = Number(answer);
-  if (!Number.isInteger(index) || index < 1 || index > editors.length) {
-    process.stderr.write(`tode: ${answer} is not one of the choices\n`);
-    return null;
-  }
-  return editors[index - 1];
+  const picked = await select(
+    "Import from which editor?",
+    editors.map((editor) => ({ label: editor.name, iconPng: editorIconPng(editor.name) })),
+  );
+  return picked === null ? null : editors[picked];
 }
 
 export async function importCommand(args: string[]): Promise<number> {
@@ -97,18 +70,11 @@ export async function importCommand(args: string[]): Promise<number> {
   }
   if (report.settings) {
     process.stdout.write(line("settings", `${report.settings.imported} entries`));
-    if (report.settings.keptByTode.length) {
-      process.stdout.write(
-        `    ${dim(`tode keeps its own: ${report.settings.keptByTode.join(", ")}`)}\n`,
-      );
-    }
   }
-  if (report.keybindings !== null) {
-    process.stdout.write(line("keybindings", `${report.keybindings} of yours, plus tode's ctrl chords`));
+  if (report.keybindings) {
+    process.stdout.write(line("keybindings", `${report.keybindings} entries`));
   }
   if (report.snippets.length) process.stdout.write(line("snippets", report.snippets.join(", ")));
   if (report.tasks) process.stdout.write(line("tasks", "tasks.json"));
-
-  process.stdout.write(`\nopen tode again to pick it up\n`);
   return 0;
 }

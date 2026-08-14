@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DEFAULT_INSTALL_ROOT, INSTALL_ROOT, STATE_DIR } from "./runtime/paths";
+import { targetTriple } from "./runtime/release";
 
 const ORIGIN = process.env.TODE_RELEASE_ORIGIN ?? "https://tode.sh/install";
 
@@ -15,6 +16,14 @@ export interface Build {
   sha256: string;
   size: number;
   url: string;
+}
+
+/** What the release worker serves: one entry per target, each carrying its
+ * own download url. */
+interface Manifest {
+  version: string;
+  channel: string;
+  platforms: Record<string, { file: string; sha256: string; size: number; url: string }>;
 }
 
 function readTrimmed(file: string): string | null {
@@ -34,11 +43,28 @@ export function installed(): { version: string; channel: string } | null {
   return { version, channel };
 }
 
+function buildFor(manifest: Manifest): Build {
+  const target = targetTriple();
+  const build = manifest.platforms?.[target];
+  if (!build) {
+    throw new Error(`tode ${manifest.version} has no build for ${target}`);
+  }
+  return { version: manifest.version, channel: manifest.channel, platform: target, ...build };
+}
+
 export async function latest(channel: string): Promise<Build> {
   const url = channel === "stable" ? `${ORIGIN}/latest.json` : `${ORIGIN}/${channel}/latest.json`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`could not read ${url} (${response.status})`);
-  return (await response.json()) as Build;
+  return buildFor((await response.json()) as Manifest);
+}
+
+/** A pinned version's manifest, for `tode upgrade --version`. */
+export async function release(version: string): Promise<Build> {
+  const url = `${ORIGIN}/v/${version}/manifest.json`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`no release ${version} (${response.status} from ${url})`);
+  return buildFor((await response.json()) as Manifest);
 }
 
 async function fetchBuild(build: Build, onProgress?: (fraction: number) => void): Promise<string> {
@@ -121,9 +147,7 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<Outcome> {
   if (!here) return { kind: "not-an-install", root: INSTALL_ROOT };
 
   options.onStage?.("checking", 0);
-  const build = options.version
-    ? { ...(await latest(here.channel)), version: options.version }
-    : await latest(here.channel);
+  const build = options.version ? await release(options.version) : await latest(here.channel);
 
   if (build.version === here.version && !options.version) {
     return { kind: "current", version: here.version, channel: here.channel };

@@ -283,13 +283,19 @@ const WELCOME_LINES = [
   ["ctrl c", "quit tode"],
 ];
 
+/** One fallback chain for every place a font family lands — the injected css
+ * and the settings profile must never drift apart, or a machine without the
+ * bundled font renders the chrome and the editor in different faces. Menlo
+ * covers macOS; DejaVu and Liberation are what linux distributions ship. */
+export const FONT_FALLBACKS = `Menlo, "DejaVu Sans Mono", "Liberation Mono", monospace`;
+
 export function injectedCss(
   background: string,
   fontFamily: string,
   skeleton?: { sidebar: string; line: string },
   welcome?: WelcomeColors,
 ): string {
-  const stack = `"${fontFamily}", Menlo, Monaco, monospace`;
+  const stack = `"${fontFamily}", ${FONT_FALLBACKS}`;
   return [
     ...(skeleton
       ? [

@@ -150,6 +150,25 @@ export default {
       return notFound();
     }
 
+    // the manifest behind a pinned version, for `tode upgrade --version`
+    if (segments[0] === "v" && segments.length === 3 && segments[2] === "manifest.json") {
+      const version = segments[1];
+      for (const channel of CHANNELS) {
+        const manifest = await readManifest(env, `${channel}/${version}/manifest.json`);
+        if (!manifest) continue;
+        return jsonResponse({
+          ...manifest,
+          platforms: Object.fromEntries(
+            Object.entries(manifest.platforms).map(([target, build]) => [
+              target,
+              { ...build, url: downloadUrl(installBase, manifest, build) },
+            ]),
+          ),
+        });
+      }
+      return notFound();
+    }
+
     if (path === "" || path === "/dev") {
       const channel: Channel = path === "/dev" ? "dev" : "stable";
       const manifest = await readManifest(env, `${channel}/latest.json`);

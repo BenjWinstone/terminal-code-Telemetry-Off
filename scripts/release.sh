@@ -38,10 +38,14 @@ echo "$VERSION" > "$STAGE/VERSION"
 echo "$CHANNEL" > "$STAGE/CHANNEL"
 
 # The shim the installer copies to $XDG_BIN_HOME. It runs the CLI with the
-# Electron helper in node mode: the helper's Info.plist sets LSUIElement, so no
-# icon ever appears in the Dock while the CLI runs.
+# vendored electron in node mode, so an install needs no node of its own. On
+# macOS the helper binary is used: its Info.plist sets LSUIElement, so no icon
+# ever appears in the Dock while the CLI runs. The linux build unpacks to the
+# bare electron layout, where the binary is simply electron/electron.
 mkdir -p "$STAGE/bin"
-cat > "$STAGE/bin/tode" <<'SHIM'
+case "$TARGET" in
+  darwin-*)
+    cat > "$STAGE/bin/tode" <<'SHIM'
 #!/bin/sh
 ROOT="${TODE_INSTALL_ROOT:-$HOME/.local/lib/tode}"
 APP="$ROOT/vendor/terminal-browser/electron/terminal-browser.app/Contents"
@@ -50,6 +54,20 @@ HELPER="$APP/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper"
 export ELECTRON_RUN_AS_NODE=1
 exec "$HELPER" "$ROOT/dist/main.js" "$@"
 SHIM
+    ;;
+  linux-*)
+    cat > "$STAGE/bin/tode" <<'SHIM'
+#!/bin/sh
+ROOT="${TODE_INSTALL_ROOT:-$HOME/.local/lib/tode}"
+export ELECTRON_RUN_AS_NODE=1
+exec "$ROOT/vendor/terminal-browser/electron/electron" "$ROOT/dist/main.js" "$@"
+SHIM
+    ;;
+  *)
+    echo "no shim recipe for $TARGET" >&2
+    exit 1
+    ;;
+esac
 chmod +x "$STAGE/bin/tode"
 
 echo "==> fetching terminal-browser $PINNED"
@@ -84,9 +102,14 @@ mkdir -p "$STAGE/vendor/terminal-browser"
 tar -xzf "$TB_TAR" -C "$STAGE/vendor/terminal-browser" --strip-components 1
 rm -f "$TB_TAR"
 
-# resolveRuntime() checks for these two before it trusts the tree
+# resolveRuntime() checks for these two before it trusts the tree; the electron
+# piece it looks for differs per platform
+case "$TARGET" in
+  darwin-*) ELECTRON_PIECE="$STAGE/vendor/terminal-browser/electron/terminal-browser.app" ;;
+  linux-*)  ELECTRON_PIECE="$STAGE/vendor/terminal-browser/electron/electron" ;;
+esac
 [ -f "$STAGE/vendor/terminal-browser/cli/dist/main.js" ] \
-  && [ -d "$STAGE/vendor/terminal-browser/electron/terminal-browser.app" ] \
+  && [ -e "$ELECTRON_PIECE" ] \
   || { echo "the unpacked terminal-browser is missing pieces" >&2; exit 1; }
 
 echo "==> packing"

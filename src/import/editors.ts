@@ -45,11 +45,16 @@ function modified(file: string): number {
   }
 }
 
-/** Everything vscode shaped keeps its state under Application Support with a
- * User folder and a state database, whatever the product decided to call
- * itself. */
+/** Everything vscode shaped keeps its state in the platform's config home —
+ * Application Support on macOS, ~/.config on linux — with a User folder and a
+ * state database, whatever the product decided to call itself. */
 export function findEditors(): Editor[] {
-  const support = path.join(os.homedir(), "Library", "Application Support");
+  const support =
+    process.platform === "darwin"
+      ? path.join(os.homedir(), "Library", "Application Support")
+      : process.env.XDG_CONFIG_HOME && path.isAbsolute(process.env.XDG_CONFIG_HOME)
+        ? process.env.XDG_CONFIG_HOME
+        : path.join(os.homedir(), ".config");
   let names: string[];
   try {
     names = fs.readdirSync(support);

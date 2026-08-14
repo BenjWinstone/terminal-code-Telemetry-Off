@@ -334,20 +334,9 @@ export function generateTheme(palette: TerminalPalette): GeneratedTheme {
   };
 }
 
-export interface LiveSettings {
-  "workbench.colorCustomizations": Record<string, string>;
-  "editor.tokenColorCustomizations": { textMateRules: unknown[] };
-}
-
-/** The same colours as installTheme's contributed extension, but reachable
- * through a plain settings write, which vscode reacts to instantly through the
- * extension API — unlike the contributed theme, which only takes effect on the
- * next full window load. This is what makes a live terminal theme change
- * actually live, not just correct next time. */
-export function liveSettings(palette: TerminalPalette): LiveSettings {
-  const theme = generateTheme(palette);
-  return {
-    "workbench.colorCustomizations": theme.colors,
-    "editor.tokenColorCustomizations": { textMateRules: theme.tokenColors },
-  };
+/** Names the extension folder for a theme that did not come from a palette —
+ * a theme document handed over as a file or inline gets the same treatment a
+ * generated one does. */
+export function themeFingerprint(theme: object): string {
+  return crypto.createHash("sha256").update(JSON.stringify(theme)).digest("hex").slice(0, 16);
 }

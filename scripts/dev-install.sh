@@ -27,5 +27,12 @@ echo "tode -> $ROOT"
 echo "shim  $SHIM"
 case ":$PATH:" in
   *":$BIN_HOME:"*) ;;
-  *) echo; echo "add $BIN_HOME to your PATH:"; echo "  echo 'export PATH=\"$BIN_HOME:\$PATH\"' >> ~/.zshrc && exec zsh" ;;
+  *)
+    echo; echo "add $BIN_HOME to your PATH:"
+    case "${SHELL:-}" in
+      */zsh)  echo "  echo 'export PATH=\"$BIN_HOME:\$PATH\"' >> ~/.zshrc && exec zsh" ;;
+      */bash) echo "  echo 'export PATH=\"$BIN_HOME:\$PATH\"' >> ~/.bashrc && exec bash" ;;
+      *)      echo "  export PATH=\"$BIN_HOME:\$PATH\"  (add it to your shell's rc file)" ;;
+    esac
+    ;;
 esac
