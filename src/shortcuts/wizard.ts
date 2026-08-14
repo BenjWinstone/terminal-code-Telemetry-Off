@@ -8,8 +8,7 @@ import { DATA_DIR } from "../runtime/paths";
 import { resolveRuntimeWithProgress, supportedFlags } from "../runtime/release";
 import { CHORD_GROUPS, EDITOR_CHORDS, editorChord } from "./catalog";
 import { VIM_EXTENSIONS, extensionHolder, importedHolder, importedQuitConflict } from "./imported";
-import type { ImportedConflict } from "./imported";
-import { fit, wrap } from "./prompt";
+import { wrap } from "./prompt";
 import { providerFor, providerNames } from "./provider";
 import type { ProviderConflict, ShortcutProvider } from "./provider";
 import { CLAIM_DECISION_ID, IMPORT_DECISION_ID, QUIT_CHORD, clearDecisions, loadDecisions, saveDecisions } from "./store";
@@ -17,7 +16,6 @@ import type { Decision } from "./store";
 import { startManager } from "./web";
 import type { ManagerRow, ManagerStep } from "./web";
 
-const bold = (text: string) => `\x1b[1m${text}\x1b[0m`;
 const dim = (text: string) => `\x1b[2m${text}\x1b[0m`;
 
 const MODS = ["ctrl", "shift", "alt", "cmd"];
@@ -46,50 +44,6 @@ function applyDecisions(provider: ShortcutProvider, conflicts: ProviderConflict[
 
 function say(text: string, style: (line: string) => string = (line) => line): void {
   process.stdout.write(`${wrap(text, "  ").map(style).join("\n")}\n`);
-}
-
-function status(
-  provider: ShortcutProvider,
-  conflicts: ProviderConflict[],
-  imported: ImportedConflict | null,
-): string {
-  const choices = loadDecisions()?.choices ?? {};
-  const ids = [...conflicts.map((conflict) => conflict.editorId), ...(imported ? [QUIT_CHORD] : [])];
-  const width = Math.max(...ids.map((id) => id.length));
-  const rows = conflicts.map((conflict) => {
-    const decided = choices[conflict.editorId];
-    const state = !decided
-      ? "not decided"
-      : decided.choice === "terminal"
-        ? decided.key
-          ? `terminal side on ${decided.key}`
-          : "freed in the terminal"
-        : decided.choice === "editor"
-          ? `on ${decided.key} in the editor`
-          : "left alone";
-    const means = conflict.editor?.means ?? editorChord(conflict.editorId).means;
-    const plain = fit(`  ${conflict.editorId.padEnd(width)}  ${state.padEnd(26)} ${means}`);
-    return plain.replace(conflict.editorId.padEnd(width), bold(conflict.editorId.padEnd(width)));
-  });
-  if (imported) {
-    const decided = choices[IMPORT_DECISION_ID];
-    const state = !decided
-      ? "not decided"
-      : decided.choice === "editor" && decided.key === QUIT_CHORD
-        ? "quit tode wins"
-        : decided.choice === "editor"
-          ? `on ${decided.key} in the editor`
-          : `left with ${imported.command}`;
-    const plain = fit(
-      `  ${QUIT_CHORD.padEnd(width)}  ${state.padEnd(26)} imported ${imported.command} sits on the quit chord`,
-    );
-    rows.push(plain.replace(QUIT_CHORD.padEnd(width), bold(QUIT_CHORD.padEnd(width))));
-  }
-  const title =
-    conflicts.length > 0
-      ? `${provider.name} and the editor both want these:`
-      : "an imported keybinding and tode both want this:";
-  return `${bold(fit(title))}\n\n${rows.join("\n")}\n`;
 }
 
 /** The rows the manager page shows, freshly derived from disk so the page can
@@ -265,13 +219,10 @@ async function runManager(
   const dismissed = new Set<string>();
   let confirmed = false;
   let reloadedLive = false;
-  const visible = new Set(
-    managerRows(provider, staged)
-      .filter((row) => row.decision === null && !(row.kind === "import" && row.claimDecision))
-      .map((row) => row.id),
-  );
+  // every row is a step, decided or not — the manager always opens on step
+  // one, with earlier decisions prefilled rather than hidden
   const manager = await startManager({
-    steps: () => managerSteps(provider, staged, dismissed, visible),
+    steps: () => managerSteps(provider, staged, dismissed),
     allRows: () => managerRows(provider, staged),
     taken: (chord) => {
       const terminal = provider.takenAs(chord);
@@ -446,11 +397,8 @@ export async function shortcutsCommand(args: string[]): Promise<number> {
     return 0;
   }
 
-  if (args.includes("--status") || !process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stdout.write(status(provider, conflicts, imported));
-    if (!args.includes("--status")) {
-      process.stdout.write("\nrun tode shortcuts on a terminal to decide these interactively\n");
-    }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    process.stdout.write("run tode shortcuts on a terminal to decide these interactively\n");
     return 0;
   }
 
@@ -464,7 +412,6 @@ export async function shortcutsCommand(args: string[]): Promise<number> {
     if (!reloadedLive) say(provider.reloadHint(), dim);
     return BOOT_AFTER_APPLY;
   }
-  process.stdout.write(`\n${status(provider, provider.scan(), importedQuitConflict())}`);
-  say("chords freed in the terminal need its reload; editor chords land on the next tode open", dim);
+  // closing without applying needs no recap — tode shortcuts --status has it
   return code;
 }

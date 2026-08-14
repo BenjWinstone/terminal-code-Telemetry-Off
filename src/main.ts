@@ -116,7 +116,7 @@ Options:
 
 Commands:
   shortcuts             Decide, chord by chord, whether this terminal or the
-                        editor gets each contested shortcut (--status, --undo)
+                        editor gets each contested shortcut (--undo)
   timing                Where the last page load spent its time
   quit                  Close the tode panes, leaving code-server warm
   import [editor]       Bring settings, keybindings, snippets and extensions

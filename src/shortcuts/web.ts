@@ -183,9 +183,24 @@ export function buildPage(deps: ManagerDeps): string {
     cursor: pointer; text-align: left;
   }
   .menu button:hover, .menu button:focus { background: color-mix(in srgb, var(--fg) 8%, var(--bg)); outline: none; }
-  .tip { color: var(--faint); margin-bottom: 1.6rem; }
+  .tipwrap { position: relative; margin-bottom: 2.6rem; }
+  .tip { color: var(--faint); }
+  .tiparrows {
+    position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+    color: var(--faint); pointer-events: none;
+  }
+  /* the duel wraps to one column on a narrow pane; arrows to nowhere go */
+  @media (max-width: 620px) { .tiparrows { display: none; } }
   .caption { color: var(--dim); margin-top: .5rem; min-height: 3.1em; }
-  .caption .detail { color: var(--faint); font-size: 11px; margin-top: .3rem; overflow-wrap: anywhere; }
+  /* every step's caption region is the same height, so the verdict and the
+     arrows below never move between steps — sized for a full command id plus
+     its guard, nothing truncated */
+  .duel-block:not(.tight) .caption { height: 7.8em; overflow: hidden; }
+  .caption .detail {
+    color: var(--faint); font-size: 11px; margin-top: .3rem;
+    overflow-wrap: anywhere; white-space: pre-line;
+  }
+  .tipwrap.ghost { visibility: hidden; }
   .verdict { margin: 1.6rem 0 0; min-height: 1.6em; }
   .verdict.bad { color: var(--red); }
   .verdict.good { color: var(--green); }
@@ -547,7 +562,7 @@ function appColumn(row, side) {
 /** The duel is the one conflict component; single screens show one, group
  * screens stack several identical ones. */
 function duelBlock(row, tight) {
-  const holder = el("div", "duel-block");
+  const holder = el("div", "duel-block" + (tight ? " tight" : ""));
   const duel = el("div", "duel");
   duel.appendChild(appColumn(row, "left"));
   duel.appendChild(appColumn(row, "right"));
@@ -601,8 +616,23 @@ function render() {
 }
 
 function renderConflict(main, row) {
-  // one hint, on the first screen only — by the second one it is muscle memory
-  if (at === 0) main.appendChild(el("div", "tip", "click to remap shortcut"));
+  // one hint, visible on the first screen only — by the second one it is
+  // muscle memory. The space stays reserved on every step, so leaving step
+  // one never shifts the boxes below. The arrows drop onto each chord box.
+  {
+    const wrap = el("div", "tipwrap" + (at === 0 ? "" : " ghost"));
+    wrap.appendChild(el("div", "tip", "click to remap shortcut"));
+    // straight lines with one 90° elbow each, ending over the inner ear of
+    // either chord box (the duel is 2×15rem boxes with a 3.5rem gap)
+    wrap.insertAdjacentHTML(
+      "beforeend",
+      '<svg class="tiparrows" width="560" height="48" viewBox="0 0 560 48" fill="none" stroke="currentColor" stroke-width="1.5">' +
+        '<path d="M262 6 L 192 6 L 192 38"/><path d="M186 31 L 192 39 L 198 31"/>' +
+        '<path d="M298 6 L 368 6 L 368 38"/><path d="M362 31 L 368 39 L 374 31"/>' +
+        "</svg>",
+    );
+    main.appendChild(wrap);
+  }
   main.appendChild(duelBlock(row, false));
   const next = stepNav(main);
   if (menu === null && capturing === null) next.focus();

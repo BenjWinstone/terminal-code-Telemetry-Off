@@ -479,7 +479,7 @@ export function allConflicts(
         recommend: action && PRECIOUS_ACTIONS.test(action) ? "keep" : "terminal",
         // the label above is generated from the command id; the id and its
         // guard are the real metadata, shown small under the label
-        detail: held.guard ? `${held.command} · when ${held.guard}` : held.command,
+        detail: held.guard ? `${held.command}\nwhen ${held.guard}` : held.command,
       },
       short: doing,
       inTerminal: `runs ${doing} in Ghostty, so ${words(held.command)} never reaches the editor`,

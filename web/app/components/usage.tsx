@@ -10,6 +10,7 @@ const LINES = [
   { cmd: "tode --review", note: "opens on the source control panel" },
   { cmd: "tode import", note: "brings your vscode settings over" },
   { cmd: "tode shortcuts", note: "helps you resolve conflicting keybinds between the terminal and tode" },
+  { cmd: "tode upgrade", note: "upgrades tode to the newest version" },
 ];
 
 export default function Usage() {
