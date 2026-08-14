@@ -16,6 +16,7 @@ import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetc
 import { installBridge, requestStartupView } from "./bridge";
 import { BOOT_AFTER_APPLY, firstRunShortcuts, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
+import { firstRunImport } from "./import/firstrun";
 import { parseGoto, runningWindow, sendToWindow } from "./ipc";
 import type { OpenFile } from "./ipc";
 import { EXTENSIONS_DIR, VSCODE_DIR, registerThemeExtension } from "./profile";
@@ -247,8 +248,10 @@ async function openCommand(args: string[]): Promise<number> {
   installSettings();
   setLiveTheme(generateTheme(palette));
   done("profile");
-  // once, before the first editor ever shows: contested chords get resolved
-  // while the cost of a wrong one is still zero
+  // once, before the first editor ever shows: the other editor's setup comes
+  // over first (imported keybindings feed the shortcut scan), then contested
+  // chords get resolved while the cost of a wrong one is still zero
+  await firstRunImport();
   await firstRunShortcuts();
   // after the wizard on purpose: the bridge bakes the quit hint and the
   // keybindings read the decisions, so both have to see what was just chosen

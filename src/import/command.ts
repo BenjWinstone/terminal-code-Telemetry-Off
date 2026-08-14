@@ -2,6 +2,7 @@ import { editorIconPng } from "./appicon";
 import { describe, findEditors, summarise } from "./editors";
 import type { Editor } from "./editors";
 import { runImport } from "./run";
+import type { ImportReportRow } from "./web";
 import { select } from "../terminal/select";
 
 const bold = (text: string) => `\x1b[1m${text}\x1b[0m`;
@@ -61,20 +62,31 @@ export async function importCommand(args: string[]): Promise<number> {
   });
   if (process.stdout.isTTY && contents.extensions) process.stdout.write("\r".padEnd(60) + "\r");
 
-  const line = (label: string, value: string) => `  ${green("✓")} ${label.padEnd(13)} ${value}\n`;
+  for (const row of reportRows(report)) {
+    const mark = row.kind === "warn" ? yellow("!") : green("✓");
+    process.stdout.write(`  ${mark} ${row.label.padEnd(13)} ${row.value}\n`);
+  }
+  return 0;
+}
+
+/** The import receipt as rows, shared by the cli and the first-run page. */
+export function reportRows(report: ReturnType<typeof runImport>): ImportReportRow[] {
+  const rows: ImportReportRow[] = [];
   if (report.extensions.copied.length) {
-    process.stdout.write(line("extensions", `${report.extensions.copied.length} copied`));
+    rows.push({ kind: "ok", label: "extensions", value: `${report.extensions.copied.length} copied` });
   }
   for (const { id, why } of report.extensions.skipped) {
-    process.stdout.write(`  ${yellow("!")} ${"skipped".padEnd(13)} ${id} — ${why}\n`);
+    rows.push({ kind: "warn", label: "skipped", value: `${id} — ${why}` });
   }
   if (report.settings) {
-    process.stdout.write(line("settings", `${report.settings.imported} entries`));
+    rows.push({ kind: "ok", label: "settings", value: `${report.settings.imported} entries` });
   }
   if (report.keybindings) {
-    process.stdout.write(line("keybindings", `${report.keybindings} entries`));
+    rows.push({ kind: "ok", label: "keybindings", value: `${report.keybindings} entries` });
   }
-  if (report.snippets.length) process.stdout.write(line("snippets", report.snippets.join(", ")));
-  if (report.tasks) process.stdout.write(line("tasks", "tasks.json"));
-  return 0;
+  if (report.snippets.length) {
+    rows.push({ kind: "ok", label: "snippets", value: report.snippets.join(", ") });
+  }
+  if (report.tasks) rows.push({ kind: "ok", label: "tasks", value: "tasks.json" });
+  return rows;
 }
