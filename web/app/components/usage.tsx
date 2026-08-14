@@ -5,11 +5,11 @@
 const LINES = [
   { cmd: "tode", note: "opens the current folder" },
   { cmd: "tode <folder>", note: "opens that folder" },
-  { cmd: "tode <file>", note: "opens the file" },
+  { cmd: "tode <file>", note: "opens that file" },
   { cmd: "tode --split right", note: "opens tode in a terminal split pane to the right" },
   { cmd: "tode --review", note: "opens on the source control panel" },
-  { cmd: "tode import", note: "brings your vscode settings over" },
-  { cmd: "tode shortcuts", note: "helps you resolve conflicting keybinds between the terminal and tode" },
+  { cmd: "tode import", note: "import settings from vscode compatible editors" },
+  { cmd: "tode shortcuts", note: "helps resolve conflicting keybinds between the terminal and tode" },
   { cmd: "tode upgrade", note: "upgrades tode to the newest version" },
 ];
 
