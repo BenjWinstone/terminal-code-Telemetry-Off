@@ -6,7 +6,7 @@ import { GithubMark } from "./icons";
 
 export default function SiteHeader() {
   return (
-    <header className="sticky top-0 z-30 border-b border-border-soft bg-bg/85 backdrop-blur-md">
+    <header className="border-b border-border-soft">
       <div className="mx-auto flex h-[52px] max-w-[880px] items-center justify-between px-5 sm:px-8">
         <Link
           href="/"
