@@ -266,22 +266,6 @@ export function createInjector(
  *
  * There is also no setting for the font of the interface itself, only for the
  * editor and the terminal, so the rest of the workbench is styled here. */
-export interface WelcomeColors {
-  accent: string;
-  text: string;
-  faint: string;
-  rule: string;
-}
-
-/** The chords worth knowing, laid out in one preformatted block because a
- * pseudo element is all the markup css gets. */
-const WELCOME_LINES = [
-  ["ctrl p", "go to file"],
-  ["ctrl \u21e7 p", "commands"],
-  ["ctrl \u21e7 f", "search"],
-  ["ctrl `", "terminal"],
-  ["ctrl c", "quit tode"],
-];
 
 /** One fallback chain for every place a font family lands — the injected css
  * and the settings profile must never drift apart, or a machine without the
@@ -293,7 +277,6 @@ export function injectedCss(
   background: string,
   fontFamily: string,
   skeleton?: { sidebar: string; line: string },
-  welcome?: WelcomeColors,
 ): string {
   const stack = `"${fontFamily}", ${FONT_FALLBACKS}`;
   return [
@@ -321,27 +304,7 @@ export function injectedCss(
     `.monaco-menu,.quick-input-widget,.monaco-hover,.notifications-toasts`,
     `{font-family:${stack} !important;}`,
     `:root{--monaco-monospace-font:${stack};}`,
-    ...(welcome
-      ? [
-          // vscode's empty editor is a greyed out picture of an editor. This puts
-          // something useful there instead, in css alone so that it comes back
-          // every time vscode rebuilds the watermark.
-          ".editor-group-watermark>.watermark-container>.letterpress{display:none;}",
-          ".editor-group-watermark{display:flex;align-items:center;justify-content:center;}",
-          ".editor-group-watermark>.watermark-container{display:block;text-align:left;}",
-          `.editor-group-watermark>.watermark-container::before{content:"tode";display:block;`,
-          `font:600 22px ${stack};color:${welcome.accent};letter-spacing:-0.02em;margin:0 0 2px;}`,
-          `.editor-group-watermark>.watermark-container>.shortcuts::before{`,
-          `content:"${WELCOME_LINES.map(([k]) => k).join("\\A ")}";`,
-          `white-space:pre;display:inline-block;vertical-align:top;margin-right:20px;`,
-          `font:400 12px ${stack};color:${welcome.text};line-height:1.9;}`,
-          `.editor-group-watermark>.watermark-container>.shortcuts::after{`,
-          `content:"${WELCOME_LINES.map(([, v]) => v).join("\\A ")}";`,
-          `white-space:pre;display:inline-block;vertical-align:top;`,
-          `font:400 12px ${stack};color:${welcome.faint};line-height:1.9;}`,
-          `.editor-group-watermark>.watermark-container>.shortcuts{`,
-          `display:block;border-top:1px solid ${welcome.rule};padding-top:10px;margin-top:8px;}`,
-        ]
-      : []),
+    // an empty editor stays empty: no letterpress picture, no shortcut tips
+    ".editor-group-watermark{display:none !important;}",
   ].join("");
 }

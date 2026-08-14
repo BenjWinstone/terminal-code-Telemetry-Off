@@ -10,13 +10,12 @@ import { DATA_DIR } from "./runtime/paths";
 import { claimBindings, fallbackBindings, hintBindings, overrideBindings, quitBindings } from "./shortcuts/store";
 import { queryTerminal, withFallbacks } from "./terminal/osc";
 import type { TerminalPalette } from "./terminal/osc";
-import { hex, legible, mix } from "./theme/color";
+import { hex } from "./theme/color";
 import {
   THEME_NAME,
   generateTheme,
   paletteFingerprint,
   themeFingerprint,
-  semanticColors,
   surfaces,
 } from "./theme/generate";
 
@@ -304,12 +303,6 @@ export function installCss(palette: TerminalPalette): boolean {
       hex(palette.background),
       FONT_FAMILY,
       { sidebar: hex(surface.sunken), line: hex(surface.raised) },
-      {
-        accent: hex(legible(semanticColors(palette).blue, surface.editor, 3)),
-        text: hex(mix(palette.foreground, palette.background, 0.25)),
-        faint: hex(mix(palette.foreground, palette.background, 0.55)),
-        rule: hex(surface.border),
-      },
     ),
   );
 }
