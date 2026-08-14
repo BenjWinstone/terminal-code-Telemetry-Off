@@ -144,6 +144,9 @@ export function buildPage(deps: ManagerDeps): string {
     padding-top: clamp(2rem, 18vh, 9rem);
     width: 100%; max-width: 44rem; text-align: center;
   }
+  /* the confirm table is tall — the vertical centering that suits a single
+     duel would push it off the bottom instead */
+  main.confirm { padding-top: 1.2rem; }
   .duel { display: flex; gap: 3.5rem; justify-content: center; flex-wrap: wrap; }
   .app { display: flex; flex-direction: column; align-items: center; width: 15rem; }
   .name {
@@ -180,6 +183,7 @@ export function buildPage(deps: ManagerDeps): string {
     cursor: pointer; text-align: left;
   }
   .menu button:hover, .menu button:focus { background: color-mix(in srgb, var(--fg) 8%, var(--bg)); outline: none; }
+  .tip { color: var(--faint); margin-bottom: 1.6rem; }
   .caption { color: var(--dim); margin-top: .5rem; min-height: 3.1em; }
   .caption .detail { color: var(--faint); font-size: 11px; margin-top: .3rem; overflow-wrap: anywhere; }
   .verdict { margin: 1.6rem 0 0; min-height: 1.6em; }
@@ -217,6 +221,13 @@ export function buildPage(deps: ManagerDeps): string {
     background: color-mix(in srgb, var(--fg) 6%, var(--bg));
   }
   .chip img { width: 13px; height: 13px; }
+  /* on a primary button the chip sits on the inverted fill, so its dark-page
+     colours flip with it — otherwise its label lands dark-on-dark */
+  .option.primary .chip {
+    border-color: color-mix(in srgb, var(--bg) 35%, var(--fg));
+    background: color-mix(in srgb, var(--bg) 8%, var(--fg));
+    color: var(--bg);
+  }
   .done-list { color: var(--dim); margin: .8rem 0 0; line-height: 1.9; }
   .final {
     display: grid;
@@ -571,6 +582,7 @@ function stepNav(main) {
 function render() {
   const main = document.getElementById("main");
   main.replaceChildren();
+  main.className = at >= steps.length ? "confirm" : "";
   document.getElementById("progress").textContent =
     at >= 0 && at < steps.length ? (at + 1) + " of " + steps.length : "";
   // the intro is one message and two buttons — no corner button, no key hints
@@ -589,6 +601,8 @@ function render() {
 }
 
 function renderConflict(main, row) {
+  // one hint, on the first screen only — by the second one it is muscle memory
+  if (at === 0) main.appendChild(el("div", "tip", "click to remap shortcut"));
   main.appendChild(duelBlock(row, false));
   const next = stepNav(main);
   if (menu === null && capturing === null) next.focus();

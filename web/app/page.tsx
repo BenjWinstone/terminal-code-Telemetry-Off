@@ -12,7 +12,7 @@ export default function Home() {
       <main className="mx-auto w-full max-w-[880px] px-5 sm:px-8">
         {/* the left rail is an indent now rather than an index — with one
             section left there is no sequence to number */}
-        <div className="grid grid-cols-1 gap-8 pt-16 pb-14 sm:grid-cols-[64px_1fr] sm:pt-24 sm:pb-16">
+        <div className="grid grid-cols-1 gap-8 py-16 sm:grid-cols-[64px_1fr] sm:py-24">
           <div className="hidden sm:block" aria-hidden />
           <div className="min-w-0">
             <h1 className="text-[20px] leading-[1.22] font-medium tracking-[-0.02em] text-text sm:text-[26px] sm:whitespace-nowrap">
