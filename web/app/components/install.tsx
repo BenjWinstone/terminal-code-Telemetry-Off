@@ -28,7 +28,7 @@ export default function Install() {
       </div>
 
       <div className="flex h-[38px] max-w-full items-center border border-border bg-panel px-3.5">
-        <span className="mr-[9px] text-faint">$</span>
+        <span className="mr-[9px] text-ok">$</span>
         <code className="flex-1 overflow-x-auto whitespace-nowrap text-[11px] text-text2 sm:text-[12px]">
           {CMD}
         </code>

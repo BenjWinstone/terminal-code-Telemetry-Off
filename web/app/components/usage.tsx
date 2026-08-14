@@ -21,7 +21,10 @@ export default function Usage() {
           className="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:items-baseline sm:gap-6"
         >
           <code className="font-mono text-[12px] whitespace-nowrap text-text2 sm:w-[220px] sm:shrink-0">
-            {l.cmd}
+            {/* the binary name reads as a prompt highlight, the way a shell
+                with syntax colouring would set it */}
+            <span className="text-ok">{l.cmd.split(" ")[0]}</span>
+            {l.cmd.includes(" ") ? l.cmd.slice(l.cmd.indexOf(" ")) : ""}
           </code>
           <span className="text-[12.5px] text-muted">{l.note}</span>
         </div>

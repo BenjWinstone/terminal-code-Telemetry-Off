@@ -67,7 +67,7 @@ pre {
 }
 
 ::selection {
-  background: var(--text);
+  background: var(--ok);
   color: var(--bg);
 }
 
@@ -95,7 +95,7 @@ pre {
      without this — roughly the cell gap a terminal would leave */
   margin-left: 0.19em;
   vertical-align: -0.16em;
-  background: currentColor;
+  background: var(--ok);
   animation: caret-blink 1.06s steps(1) infinite;
 }
 @keyframes caret-blink {

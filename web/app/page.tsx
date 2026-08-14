@@ -12,9 +12,9 @@ export default function Home() {
       <main className="mx-auto w-full max-w-[880px] px-5 sm:px-8">
         {/* the left rail is an indent now rather than an index — with one
             section left there is no sequence to number */}
-        <div className="grid gap-8 pt-16 pb-14 sm:grid-cols-[64px_1fr] sm:pt-24 sm:pb-16">
+        <div className="grid grid-cols-1 gap-8 pt-16 pb-14 sm:grid-cols-[64px_1fr] sm:pt-24 sm:pb-16">
           <div className="hidden sm:block" aria-hidden />
-          <div>
+          <div className="min-w-0">
             <h1 className="text-[20px] leading-[1.22] font-medium tracking-[-0.02em] text-text sm:text-[26px] sm:whitespace-nowrap">
               VS Code inside your{" "}
               <span className="keyword">
@@ -30,7 +30,7 @@ export default function Home() {
         </div>
 
         {/* the demo sits in the same column as the text, indent and all */}
-        <div className="grid gap-8 sm:grid-cols-[64px_1fr]">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-[64px_1fr]">
           <div className="hidden sm:block" aria-hidden />
           <VideoPlayer
             dark={{
@@ -47,7 +47,7 @@ export default function Home() {
           />
         </div>
 
-        <div className="grid gap-6 pt-12 sm:grid-cols-[64px_1fr] sm:gap-8 sm:pt-14">
+        <div className="grid grid-cols-1 gap-6 pt-12 sm:grid-cols-[64px_1fr] sm:gap-8 sm:pt-14">
           <div className="hidden sm:block" aria-hidden />
           <Usage />
         </div>

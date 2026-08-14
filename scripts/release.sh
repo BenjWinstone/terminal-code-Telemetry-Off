@@ -77,7 +77,10 @@ INSTALLER="$(curl -fsSL "https://terminal-browser.sh/install/v/$PINNED")"
 field() { printf '%s\n' "$INSTALLER" | sed -n "s/^$1=\"\([^\"]*\)\".*/\1/p" | head -1; }
 # Newer installers carry a table of "target url sha256 size"; older ones, and
 # the single-target ones, carry DOWNLOAD_URL and SHA256 at the top instead.
-TB_ROW="$(printf '%s\n' "$INSTALLER" | awk -v t="$TARGET" '$1 == t && NF == 4')"
+# The first row rides on the PLATFORMS=" line itself, so the wrapper has to
+# come off before rows can be matched by their first column.
+TB_TABLE="$(printf '%s\n' "$INSTALLER" | sed -n '/^PLATFORMS="/,/"$/p' | sed 's/^PLATFORMS="//; s/"$//')"
+TB_ROW="$(printf '%s\n' "$TB_TABLE" | awk -v t="$TARGET" '$1 == t && NF == 4')"
 if [ -n "$TB_ROW" ]; then
   TB_URL="$(printf '%s\n' "$TB_ROW" | awk '{print $2}')"
   TB_SHA="$(printf '%s\n' "$TB_ROW" | awk '{print $3}')"
