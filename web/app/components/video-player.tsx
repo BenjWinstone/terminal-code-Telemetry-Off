@@ -225,7 +225,7 @@ export default function VideoPlayer({
             aria-label="Play demo"
             className="group absolute inset-0 grid place-items-center"
           >
-            <span className="flex items-center gap-2.5 rounded-full border border-border bg-bg/75 py-2 pr-4 pl-3.5 font-mono text-[11px] text-text backdrop-blur-sm transition-colors group-hover:bg-bg/90">
+            <span className="flex items-center gap-2.5 border border-border bg-bg/75 py-2 pr-4 pl-3.5 font-mono text-[11px] text-text backdrop-blur-sm transition-colors group-hover:bg-bg/90">
               <svg width="9" height="11" viewBox="0 0 9 11" aria-hidden>
                 <path d="M0 0L9 5.5L0 11Z" fill="currentColor" />
               </svg>

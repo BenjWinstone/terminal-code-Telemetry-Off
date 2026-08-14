@@ -29,8 +29,10 @@ export default function Home() {
           </div>
         </div>
 
+        <div className="rule" aria-hidden />
+
         {/* the demo sits in the same column as the text, indent and all */}
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-[64px_1fr]">
+        <div className="grid grid-cols-1 gap-8 py-12 sm:grid-cols-[64px_1fr] sm:py-14">
           <div className="hidden sm:block" aria-hidden />
           <VideoPlayer
             dark={{
@@ -47,13 +49,50 @@ export default function Home() {
           />
         </div>
 
+        <div className="rule" aria-hidden />
+
         <div className="grid grid-cols-1 gap-6 pt-12 sm:grid-cols-[64px_1fr] sm:gap-8 sm:pt-14">
           <div className="hidden sm:block" aria-hidden />
           <Usage />
         </div>
 
+        <div className="rule mt-12 sm:mt-14" aria-hidden />
+
+        <div className="grid grid-cols-1 gap-6 pt-12 sm:grid-cols-[64px_1fr] sm:gap-8 sm:pt-14">
+          <div className="hidden sm:block" aria-hidden />
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-medium tracking-[-0.01em] text-text">
+              How does it work?
+            </h2>
+            <p className="mt-3 max-w-[560px] text-[13px] leading-[1.75] text-muted">
+              tode combines{" "}
+              <a
+                href="https://github.com/coder/code-server"
+                target="_blank"
+                rel="noreferrer"
+                className="text-text2 underline decoration-border underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok/50"
+              >
+                code-server
+              </a>{" "}
+              (VS Code in the browser) and{" "}
+              <a
+                href="https://github.com/zenbu-labs/terminal-browser"
+                target="_blank"
+                rel="noreferrer"
+                className="text-text2 underline decoration-border underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok/50"
+              >
+                terminal-browser
+              </a>{" "}
+              (a browser in the terminal) to bring VS Code to the terminal. You
+              should look into these projects for more details!
+            </p>
+          </div>
+        </div>
+
         <footer className="rule mt-14 flex items-center justify-between py-8 sm:mt-20">
-          <span className="font-mono text-[11px] text-faint">© 2026 tode</span>
+          <span className="font-mono text-[11px] text-faint">
+            © 2026 Zenbu Labs
+          </span>
           <span className="flex items-center gap-5">
             <a
               href="mailto:rob@zenbu.dev"

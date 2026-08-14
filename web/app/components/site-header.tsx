@@ -12,9 +12,9 @@ export default function SiteHeader() {
           href="/"
           className="flex items-center gap-2.5 font-mono text-[14px] tracking-tight text-text"
         >
-          {/* the file is already exactly 2x the display size, so hand it over
-              untouched — a second resample only softens the strokes */}
-          <Image src={frog} alt="" width={28} height={22} priority unoptimized />
+          {/* hand the file over untouched and let the browser scale it — a
+              server-side resample only softens the strokes further */}
+          <Image src={frog} alt="" width={24} height={19} priority unoptimized />
           tode
         </Link>
         <a
