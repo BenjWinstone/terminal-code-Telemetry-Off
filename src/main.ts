@@ -532,8 +532,8 @@ async function main(): Promise<number> {
   }
   if (args[0] === "shortcuts") {
     const rest = args.slice(1);
-    // install.sh runs the wizard mid-install, where booting an editor on the
-    // installer's cwd would block the script — it passes --no-boot
+    // a script running the wizard would block on the editor booting over the
+    // script's own cwd — --no-boot lets it apply and return
     const noBoot = takeBool(rest, "--no-boot");
     const code = await shortcutsCommand(rest);
     if (code === BOOT_AFTER_APPLY) return noBoot ? 0 : openCommand([]);

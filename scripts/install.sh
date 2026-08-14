@@ -94,18 +94,9 @@ EOF
 
 echo
 echo "tode $VERSION -> $APP"
-echo "shim  $BIN_HOME/tode"
+echo "binary $BIN_HOME/tode"
 
-# stdin is the install script itself under curl | bash, so the wizard talks to
-# the terminal directly; a headless install just skips the offer
-if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-  printf '\nConfigure shortcuts to work well in tode (recommended)? [Y/n] ' > /dev/tty
-  IFS= read -r WANTS_SHORTCUTS < /dev/tty || WANTS_SHORTCUTS=n
-  case "$WANTS_SHORTCUTS" in
-    [nN]*) echo "you can run it any time with: tode shortcuts" > /dev/tty ;;
-    *) "$BIN_HOME/tode" shortcuts --no-boot < /dev/tty > /dev/tty 2>&1 || true ;;
-  esac
-fi
+# no setup questions here — the first open walks import and shortcuts itself
 
 case ":$PATH:" in
   *":$BIN_HOME:"*)
