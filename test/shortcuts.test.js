@@ -829,7 +829,7 @@ test("the manager serves the built page with the terminal's colours, and its sta
   const base = `http://127.0.0.1:${manager.port}`;
   try {
     const page = await (await fetch(base)).text();
-    assert.match(page, /terminal-browser shortcuts/);
+    assert.match(page, /shortcuts<\/title>/);
     assert.match(page, /--bg: #14161a/, "the page background is the terminal's");
     assert.match(page, /--fg: #e8e6e3/);
     assert.match(page, /\/assets\/index\.js/, "the built bundle is what the page loads");
@@ -854,7 +854,7 @@ test("the manager server: page, taken checks, staging, confirming, done", async 
   const base = `http://127.0.0.1:${manager.port}`;
   try {
     const page = await (await fetch(base)).text();
-    assert.match(page, /terminal-browser shortcuts/);
+    assert.match(page, /shortcuts<\/title>/);
 
     const free = await (await fetch(`${base}/taken`, { method: "POST", body: JSON.stringify({ chord: "ctrl+alt+w", id: "cmd+w" }) })).json();
     assert.deepEqual(free, { ok: true, chord: "ctrl+alt+w" });

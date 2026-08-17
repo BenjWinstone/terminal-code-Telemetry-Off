@@ -137,6 +137,11 @@ const PenIcon = () => (
   </span>
 );
 
+/** A soft hyphen after every character: the text still wraps anywhere, but a
+ * wrap now renders a "-" at the break, so a command id split mid-word reads
+ * as one wrapped id rather than two ids. Only breaks show the hyphen. */
+const softWrap = (value: string) => Array.from(value).join("­");
+
 /** One labelled-rows table, the shape every column's caption uses. */
 function DetailTable({ entries }: { entries: [string, string][] }) {
   return (
@@ -144,7 +149,7 @@ function DetailTable({ entries }: { entries: [string, string][] }) {
       {entries.map(([label, value]) => (
         <Fragment key={label}>
           <div className="k">{label}</div>
-          <div className="v">{value}</div>
+          <div className="v">{softWrap(value)}</div>
         </Fragment>
       ))}
     </div>
@@ -594,9 +599,12 @@ export function App({ state }: { state: ManagerState }) {
       <main>
         <div className={"tipwrap" + (at === 0 ? "" : " ghost")}>
           <div className="tip">click to remap shortcut</div>
-          <svg className="tiparrows" width={560} height={48} viewBox="0 0 560 48" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path d="M262 6 L 192 6 L 192 38" /><path d="M186 31 L 192 39 L 198 31" />
-            <path d="M298 6 L 368 6 L 368 38" /><path d="M362 31 L 368 39 L 374 31" />
+          {/* straight lines with one 90° elbow each, dropping past the app
+              names to rest on each chord box's top edge — the arrows must
+              touch what they mean: the button */}
+          <svg className="tiparrows" width={560} height={72} viewBox="0 0 560 72" fill="none" stroke="currentColor" strokeWidth={1.5}>
+            <path d="M262 6 L 210 6 L 210 66" /><path d="M204 59 L 210 67 L 216 59" />
+            <path d="M298 6 L 350 6 L 350 66" /><path d="M344 59 L 350 67 L 356 59" />
           </svg>
         </div>
         {renderDuel(row)}

@@ -24,7 +24,7 @@ test("the import page server: page, import, done", async () => {
   try {
     assert.equal(page.served(), false, "nothing served yet");
     const html = await (await fetch(base)).text();
-    assert.match(html, /terminal-browser import/);
+    assert.match(html, /import<\/title>/);
     assert.match(html, /--bg: #14161a/, "the page draws with the terminal's tokens");
     assert.equal(page.served(), true);
 
