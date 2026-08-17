@@ -1,0 +1,39 @@
+/* The look both pages share: the terminal's own colours arrive as css custom
+   properties, injected into <head> by the serving side (webui/pages.ts) so the
+   first paint is already themed. */
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+}
+#root {
+  min-height: 100vh; padding: 2rem 1.5rem;
+  display: flex; flex-direction: column; align-items: center;
+}
+main {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-start;
+  padding-top: clamp(2rem, 18vh, 9rem);
+  width: 100%; max-width: 44rem;
+}
+kbd {
+  border: 1px solid var(--line); border-bottom-width: 2px;
+  padding: 0 .35ch; font: inherit;
+}
+.intro { text-align: left; max-width: 34rem; width: 100%; }
+.introlead { color: var(--fg); }
+.introcount { font-weight: 700; }
+.introrest { color: var(--dim); margin-top: .8rem; }
+.introactions { display: flex; gap: 1rem; margin-top: 2rem; }
+.introactions button {
+  font: inherit; padding: .65rem 1.7rem; cursor: pointer; white-space: nowrap;
+  color: var(--dim); background: none; border: 1px solid var(--line);
+}
+.introactions button:hover { color: var(--fg); border-color: var(--dim); }
+.introactions button.primary {
+  color: var(--bg); background: var(--fg); border-color: var(--fg); font-weight: 600;
+}
+.introactions button.primary:hover { opacity: .88; }
+.introactions button:focus { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--fg) 18%, var(--bg)); }

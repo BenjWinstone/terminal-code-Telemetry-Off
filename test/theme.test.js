@@ -269,17 +269,16 @@ test("the bridge maps quit per platform, always behind a confirm", () => {
     assert.equal(quit.key, QUIT_CHORD);
     assert.equal(quit.command, "tode.confirmQuit", "quitting always asks first");
     assert.match(quit.when, /!terminalFocus/, "the quit chord is left alone in the terminal");
+    // extension carve-outs are derived from installed claims (none here);
+    // that mechanism is covered by the shortcuts store tests
     if (QUIT_CHORD === "ctrl+c") {
       assert.equal(pkg.contributes.keybindings.length, 1, "no redirect hint where ctrl+c is quit itself");
       assert.match(quit.when, /!editorHasSelection/, "a selection keeps its chord");
-      assert.match(quit.when, /vim\.mode == 'Normal' \|\| !vim\.active/, "vim keeps insert-mode ctrl+c");
-      assert.match(quit.when, /neovim\.mode != 'insert'/, "vscode-neovim keeps insert-mode ctrl+c");
     } else {
       const hint = pkg.contributes.keybindings[1];
       assert.equal(hint.key, "ctrl+c");
       assert.equal(hint.command, "tode.quitHint");
       assert.match(hint.when, /!editorHasSelection/, "ctrl+c with a selection must stay copy");
-      assert.match(hint.when, /vim\.mode == 'Normal' \|\| !vim\.active/, "vim keeps insert-mode ctrl+c");
     }
 
     const command = pkg.contributes.commands[0];

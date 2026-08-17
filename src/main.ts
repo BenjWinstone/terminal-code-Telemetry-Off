@@ -88,6 +88,18 @@ function takeBool(args: string[], name: string): boolean {
   args.splice(at, 1);
   return true;
 }
+/**
+ * im a little sus for some of these terminal commands, what is --what? is that a code thing?
+ * 
+ * perhaps
+ * 
+ * 
+ * how are we doing theming again? i thought we're just using preload and main script
+ * 
+ * well maybe it calls into the cli with that, that seems plausible
+ * 
+ * provision is odd
+ */
 
 const HELP = `Usage: tode [path...] [options]
        tode <command>
@@ -131,8 +143,9 @@ Commands:
 `;
 
 
-/** Flags code understands that tode has no use for. Swallowing them means a
- * habit, an alias or a script carries over without an error. */
+/**
+ * er?
+ */
 const IGNORED: string[] = [
   "--verbose",
   "--disable-gpu",
@@ -144,7 +157,9 @@ const IGNORED: string[] = [
   "--disable-workspace-trust",
 ];
 
-/** The same, but they take a value which has to be dropped alongside them. */
+/**
+ * er?
+ */
 const IGNORED_WITH_VALUE: string[] = [
   "--log",
   "--locale",
@@ -154,8 +169,9 @@ const IGNORED_WITH_VALUE: string[] = [
   "--extensions-dir",
 ];
 
-/** Accepted, but they would change what you get, so saying nothing would be
- * worse than saying tode cannot do it. */
+/**
+ * look into this again, i dont think i agree with our behavior here
+ */
 const UNSUPPORTED: [string, string][] = [
   ["--disable-extensions", "extensions are per code-server, not per window"],
   ["--disable-extension", "extensions are per code-server, not per window"],
@@ -172,8 +188,12 @@ function dropIgnored(args: string[]): void {
 
 async function openCommand(args: string[]): Promise<number> {
   dropIgnored(args);
-  const gotos = takeAll(args, "-g", "--goto").map(parseGoto);
-  const added = takeAll(args, "-a", "--add");
+  // -a, -g and -d are modifiers on the paths, exactly the way the code cli
+  // defines them (add/goto/diff are booleans there): the paths stay
+  // positional, so flags and paths can come in any order
+  const adding = takeBool(args, "-a") || takeBool(args, "--add");
+  const going = takeBool(args, "-g") || takeBool(args, "--goto");
+  const diffing = takeBool(args, "-d") || takeBool(args, "--diff");
   const extensions = takeAll(args, "--install-extension");
   const removals = takeAll(args, "--uninstall-extension");
   if (extensions.length > 0 || removals.length > 0) return manageExtensions(extensions, removals);
@@ -183,7 +203,6 @@ async function openCommand(args: string[]): Promise<number> {
   const newWindow = takeBool(args, "-n") || takeBool(args, "--new-window");
   const reuse = takeBool(args, "-r") || takeBool(args, "--reuse-window");
   const wait = takeBool(args, "-w") || takeBool(args, "--wait");
-  const diff = takeAll(args, "-d", "--diff");
   const split = takeFlag(args, "--split");
   const size = takeFlag(args, "--size");
   const timing = takeBool(args, "--timing");
@@ -192,23 +211,25 @@ async function openCommand(args: string[]): Promise<number> {
   if (unknown) fail(`unknown option ${unknown}`);
   if (size !== undefined && !split) fail("--size only applies with --split");
 
-  const wanted = [...args, ...added].map((argument) => resolveTarget(argument, process.cwd()));
+  if (diffing && args.length !== 2) fail("--diff takes two files");
+  const pair = diffing ? args.map((f) => path.resolve(process.cwd(), f)) : [];
+  const gotos = going && !diffing ? args.map(parseGoto) : [];
+
+  const positional = diffing || going ? [] : args;
+  const wanted = positional.map((argument) => resolveTarget(argument, process.cwd()));
   const files: OpenFile[] = [
     ...wanted.filter((t) => t.file).map((t) => ({ path: t.file! })),
     ...gotos.map((goto) => ({ ...goto, path: path.resolve(process.cwd(), goto.path) })),
   ];
-  const folders = [
-    ...wanted.filter((t) => t.folder).map((t) => t.folder!),
-    ...added.map((folder) => path.resolve(process.cwd(), folder)),
-  ].filter((folder, at, all) => all.indexOf(folder) === at);
-
-  const pair = diff.length === 2 ? diff.map((f) => path.resolve(process.cwd(), f)) : [];
-  if (diff.length !== 0 && diff.length !== 2) fail("--diff takes two files");
+  const folders = wanted
+    .filter((t) => t.folder)
+    .map((t) => t.folder!)
+    .filter((folder, at, all) => all.indexOf(folder) === at);
 
   // Run from a tode terminal, tode behaves like tode: a folder opens its own
   // pane. Opening it here would reload the window and take the terminal you
   // typed in with it, so that only happens when asked for by name.
-  const here = added.length > 0 || reuse;
+  const here = adding || reuse;
   const window = newWindow ? null : runningWindow();
   const sendFolders = here ? folders : [];
   const opensAPane = folders.length > 0 && !here;
@@ -223,7 +244,7 @@ async function openCommand(args: string[]): Promise<number> {
       {
         files,
         folders: sendFolders,
-        add: added.length > 0,
+        add: adding,
         wait,
         diff: pair,
         ...(review ? { view: "scm" } : {}),
@@ -288,6 +309,11 @@ function listExtensions(withVersions: boolean): number {
   return extensionCommand(withVersions ? ["--list-extensions", "--show-versions"] : ["--list-extensions"], true);
 }
 
+/**
+ * i wonder if we correctly handle installing from open vsx
+ * 
+ * wait no we shouldn't have to do that
+ */
 function manageExtensions(install: string[], remove: string[]): number {
   for (const id of remove) {
     const code = extensionCommand(["--uninstall-extension", id]);
@@ -319,6 +345,8 @@ async function themeCommand(file?: string): Promise<number> {
     return 0;
   }
   const { palette, source } = await readPalette();
+  // what?
+  // once again i hate this
   const where = {
     terminal: "read from this terminal",
     cache: "from the cache, this terminal did not answer",
@@ -333,6 +361,9 @@ async function themeCommand(file?: string): Promise<number> {
   for (const [name, color] of Object.entries(accent)) process.stdout.write(line(name, hex(color)));
   const { changed, fingerprint } = installTheme(palette);
   setLiveTheme(generateTheme(palette));
+  /**
+   * its weird, this is main.ts but im fairly certain this is not the mian script ran by electron
+   */
   installBridge(todeCommand());
   installCss(palette);
   installSettings();
@@ -394,15 +425,8 @@ async function daemonCommand(action: string | undefined): Promise<number> {
   return 0;
 }
 
-/** Closes the panes but leaves code-server warm, so the next open is quick. */
-interface PageTiming {
-  at: number;
-  origin: number;
-  responseEnd: number;
-  domInteractive: number;
-  loadEnd: number;
-  marks: Record<string, number>;
-}
+/** The shape the preload sends and the main script writes down. */
+type PageTiming = import("./browser/ctx").PageTiming;
 
 const STAGES: [string, string][] = [
   ["renderer started", "code/didStartRenderer"],

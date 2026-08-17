@@ -3,11 +3,12 @@ import path from "node:path";
 
 import { DATA_DIR } from "./runtime/paths";
 import { EXTENSIONS_DIR, LIVE_THEME_FILE } from "./profile";
-import { HINT_WHEN, IMPORT_DECISION_ID, QUIT_CHORD, loadDecisions } from "./shortcuts/store";
+import { IMPORT_DECISION_ID, QUIT_CHORD, QUIT_COMMAND, hintWhen, loadDecisions, quitWhen } from "./shortcuts/store";
 
 const BRIDGE_ID = "tode.tode-bridge";
-const BRIDGE_VERSION = "1.5.0";
+const BRIDGE_VERSION = "1.5.1";
 
+// what is this?
 const STARTUP_VIEW_FILE = path.join(DATA_DIR, "startup-view.json");
 
 /** tode --review writes this just before launching; the bridge consumes it on
@@ -18,22 +19,21 @@ export function requestStartupView(view: string): void {
 }
 export const BRIDGE_DIR = path.join(EXTENSIONS_DIR, `${BRIDGE_ID}-${BRIDGE_VERSION}`);
 
-/** The quit map, per platform. macOS: ctrl+c is free (copy is cmd+c) and it
- * is the terminal reflex for "make it stop", so ctrl+c asks "quit tode?" and
- * quits on confirm; ctrl+q stays whoever else's it was. linux: ctrl+c is
- * canonically copy, so quit sits on ctrl+q behind the same confirm, and a
- * stray ctrl+c answers with a modal naming ctrl+q. All chords stay out of
- * the integrated terminal, selections, input boxes, and vim's insert mode —
- * only vscode knows those states, so this lives in an extension. */
+/**
+ * 
+ * i need to map out the code this is basically gonna be a giant code review session
+ * 
+ * the obvious question is where is the entrypoint of the program
+ * so i can start traversing it
+ * 
+ * 
+ */
 function manifest(): unknown {
-  const quitBinding =
-    QUIT_CHORD === "ctrl+c"
-      ? { command: "tode.confirmQuit", key: "ctrl+c", when: HINT_WHEN }
-      : { command: "tode.confirmQuit", key: "ctrl+q", when: "!terminalFocus" };
+  const quitBinding = { command: QUIT_COMMAND, key: QUIT_CHORD, when: quitWhen() };
   const hintBinding =
     QUIT_CHORD === "ctrl+c"
       ? []
-      : [{ command: "tode.quitHint", key: "ctrl+c", when: HINT_WHEN }];
+      : [{ command: "tode.quitHint", key: "ctrl+c", when: hintWhen() }];
   return {
     name: "tode-bridge",
     displayName: "tode",
@@ -46,11 +46,12 @@ function manifest(): unknown {
     // is a few file reads and a socket, cheap enough to run during startup.
     activationEvents: ["*"],
     contributes: {
-      commands: [
-        { command: "tode.quit", title: "Quit", category: "tode" },
-        { command: "tode.confirmQuit", title: "Quit…", category: "tode" },
-        { command: "tode.quitHint", title: "How to Quit", category: "tode" },
-      ],
+      // registerCommand alone makes a command exist — a keybinding can run it
+      // without any declaration here. Declaring it is what lists it in the
+      // command palette, so only the one deliberate action is declared:
+      // confirmQuit (the ctrl+c reflex) and quitHint (the redirect toast) are
+      // keybinding targets, and a palette full of quit flavours reads as noise
+      commands: [{ command: "tode.quit", title: "Quit", category: "tode" }],
       keybindings: [quitBinding, ...hintBinding],
     },
   };

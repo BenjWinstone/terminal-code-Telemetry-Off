@@ -101,6 +101,8 @@ export function queryTerminal(timeoutMs = 400): Promise<ParsedReplies | null> {
   });
 }
 
+// eh?
+// i see, this is that blue stuff. i suppose that's fine
 const FALLBACK_ANSI: Rgb[] = [
   [26, 27, 30],
   [229, 72, 77],

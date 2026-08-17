@@ -28,7 +28,7 @@ rm -rf "$OUT"
 mkdir -p "$STAGE"
 
 echo "==> compiling"
-(cd "$ROOT" && npx tsc -p tsconfig.json)
+(cd "$ROOT" && npm run -s build)
 
 echo "==> staging"
 cp -R "$ROOT/dist" "$STAGE/dist"

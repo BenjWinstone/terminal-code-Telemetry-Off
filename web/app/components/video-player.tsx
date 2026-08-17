@@ -38,6 +38,12 @@ export default function VideoPlayer({
   const fillRef = useRef<HTMLDivElement | null>(null);
   const [isLight, setIsLight] = useState(false);
   const [playing, setPlaying] = useState(false);
+  /* While a drag is in progress the pointer owns the bar: the rAF loop and
+     timeupdate must not write over it, or the fill snaps back to wherever the
+     (still seeking) video really is and the drag looks dead. The ref is the
+     same fact for the rAF loop, which must not restart on a render. */
+  const [scrubbing, setScrubbing] = useState(false);
+  const scrubbingRef = useRef(false);
   /* expanding is a modal over the page, not the fullscreen api: same video
      element either way, so playback carries across the switch */
   const [expanded, setExpanded] = useState(false);
@@ -66,7 +72,7 @@ export default function VideoPlayer({
     const tick = () => {
       const v = videoRef.current;
       const fill = fillRef.current;
-      if (v && fill && v.duration) {
+      if (v && fill && v.duration && !scrubbingRef.current) {
         fill.style.width = `${(v.currentTime / v.duration) * 100}%`;
       }
       frame = requestAnimationFrame(tick);
@@ -120,12 +126,20 @@ export default function VideoPlayer({
 
   function onScrubDown(e: React.PointerEvent<HTMLDivElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
+    scrubbingRef.current = true;
+    setScrubbing(true);
     seekTo(e.clientX, e.currentTarget);
   }
 
   function onScrubMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    if (!scrubbingRef.current) return;
     seekTo(e.clientX, e.currentTarget);
+  }
+
+  function onScrubEnd() {
+    if (!scrubbingRef.current) return;
+    scrubbingRef.current = false;
+    setScrubbing(false);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -212,7 +226,9 @@ export default function VideoPlayer({
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
-          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+          onTimeUpdate={(e) => {
+            if (!scrubbingRef.current) setTime(e.currentTarget.currentTime);
+          }}
           onLoadedMetadata={(e) =>
             setTrack({ ...current, duration: e.currentTarget.duration })
           }
@@ -260,6 +276,9 @@ export default function VideoPlayer({
         <div
           onPointerDown={onScrubDown}
           onPointerMove={onScrubMove}
+          onPointerUp={onScrubEnd}
+          onPointerCancel={onScrubEnd}
+          onLostPointerCapture={onScrubEnd}
           className="group flex-1 cursor-pointer touch-none py-2"
           role="slider"
           aria-label="Seek"
@@ -274,8 +293,15 @@ export default function VideoPlayer({
             <div
               ref={fillRef}
               className="absolute inset-y-0 left-0 rounded-full bg-text2"
-              style={playing ? undefined : { width: `${progress}%` }}
-            />
+              style={playing && !scrubbing ? undefined : { width: `${progress}%` }}
+            >
+              {/* the thumb hangs off the fill's right edge, so every writer of
+                  the width — React or the rAF loop — moves it for free */}
+              <span
+                aria-hidden
+                className="absolute top-1/2 right-0 h-[10px] w-[10px] -translate-y-1/2 translate-x-1/2 rounded-full bg-text2 transition-transform group-hover:scale-110"
+              />
+            </div>
           </div>
         </div>
 

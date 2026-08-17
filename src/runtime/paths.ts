@@ -1,3 +1,6 @@
+/**
+ * this is quite dense, i need a mental model for this before i merge
+ */
 import os from "node:os";
 import path from "node:path";
 

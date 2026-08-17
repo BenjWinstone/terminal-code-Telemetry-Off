@@ -13,8 +13,6 @@ export interface KeymapEntry {
 }
 
 interface KeymapFile {
-  codeServer: string;
-  platform: string;
   bindings: KeymapEntry[];
 }
 
@@ -42,7 +40,6 @@ function keymapAsset(): string | null {
 }
 
 let cache: Map<string, KeymapEntry[]> | null = null;
-let generatedFor: string | null = null;
 
 function load(): Map<string, KeymapEntry[]> {
   if (cache) return cache;
@@ -51,7 +48,6 @@ function load(): Map<string, KeymapEntry[]> {
   if (!file) return cache;
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as KeymapFile;
-    generatedFor = parsed.codeServer ?? null;
     for (const entry of parsed.bindings ?? []) {
       // negative commands are the dump's own removal syntax, not bindings
       if (!entry.key || !entry.command || entry.command.startsWith("-")) continue;
@@ -62,12 +58,6 @@ function load(): Map<string, KeymapEntry[]> {
     }
   } catch {}
   return cache;
-}
-
-/** Which code-server the vendored keymap was dumped from, for the drift test. */
-export function keymapCodeServer(): string | null {
-  load();
-  return generatedFor;
 }
 
 /** What the workbench runs on this chord by default, or null. A chord the

@@ -1,20 +1,19 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { codeServerBin } from "../codeserver/server";
-import { EXTENSIONS_DIR, VSCODE_DIR, installKeybindings, readPalette } from "../profile";
+import { builtinKeybindings, installKeybindings, readPalette } from "../profile";
 import { DATA_DIR } from "../runtime/paths";
 import { resolveRuntimeWithProgress, supportedFlags } from "../runtime/release";
-import { CHORD_GROUPS, EDITOR_CHORDS, editorChord } from "./catalog";
-import { VIM_EXTENSIONS, extensionHolder, importedHolder, importedQuitConflict } from "./imported";
+import { extensionHolder, importedConflicts, importedHolder } from "./imported";
 import { wrap } from "./prompt";
 import { providerFor, providerNames } from "./provider";
 import type { ProviderConflict, ShortcutProvider } from "./provider";
-import { CLAIM_DECISION_ID, IMPORT_DECISION_ID, QUIT_CHORD, clearDecisions, loadDecisions, saveDecisions } from "./store";
+import { QUIT_CHORD, clearDecisions, loadDecisions, saveDecisions } from "./store";
 import type { Decision } from "./store";
 import { startManager } from "./web";
-import type { ManagerRow, ManagerStep } from "./web";
+import type { ManagerRow } from "./web";
+import { words } from "./words";
 
 const dim = (text: string) => `\x1b[2m${text}\x1b[0m`;
 
@@ -52,156 +51,39 @@ export function managerRows(
   provider: ShortcutProvider,
   choices: Record<string, Decision>,
 ): ManagerRow[] {
-  const rows = provider
-    .scan()
-    // quit has one chord per platform; the other platform's row is not a
-    // conflict here
-    .filter((conflict) => {
-      const isQuitRow = conflict.editorId === "ctrl+q" || conflict.editorId === "ctrl+c";
-      return !isQuitRow || conflict.editorId === QUIT_CHORD;
-    })
-    .map((conflict): ManagerRow => {
-    // a derived conflict carries its own editor side; catalog rows look it up
-    const chord = conflict.editor ?? editorChord(conflict.editorId);
-    return {
-      id: conflict.editorId,
-      kind: "terminal",
-      means: chord.means,
-      suggestion: chord.suggestion,
-      recommend: chord.recommend,
-      group: conflict.editor ? undefined : editorChord(conflict.editorId).group,
-      detail: conflict.editor?.detail,
-      terminal: {
-        name: provider.name,
-        short: conflict.short,
-        does: conflict.inTerminal,
-        freed: conflict.freed,
-        tradeoff: conflict.tradeoff,
-        // every scanned conflict is bound sans tode; the staged decision is
-        // what frees it, and the page derives the display from that
-        bound: true,
-      },
-      decision: choices[conflict.editorId] ?? null,
-    };
-  });
-  const imported = importedQuitConflict();
-  if (imported) {
-    const chord = editorChord(QUIT_CHORD);
+  const rows = provider.scan().map((conflict): ManagerRow => ({
+    id: conflict.editorId,
+    kind: "terminal",
+    means: conflict.editor.means,
+    detail: { command: conflict.editor.command, when: conflict.editor.guard },
+    terminal: {
+      name: provider.name,
+      short: conflict.short,
+      does: conflict.inTerminal,
+      freed: conflict.freed,
+      tradeoff: conflict.tradeoff,
+      // every scanned conflict is bound sans tode; the staged decision is
+      // what frees it, and the page derives the display from that
+      bound: true,
+    },
+    decision: choices[conflict.editorId] ?? null,
+  }));
+  for (const imported of importedConflicts()) {
     rows.push({
-      id: QUIT_CHORD,
+      id: imported.key,
       kind: "import",
-      means: chord.means,
-      suggestion: chord.suggestion,
-      recommend: "editor",
+      // quit is tode's own idea, named as such; every other builtin's label
+      // derives from the command it runs
+      means: imported.key === QUIT_CHORD ? "quit tode" : words(imported.builtin),
       terminal: { name: provider.name, short: "", does: "", freed: "", tradeoff: "", bound: true },
       importedCommand: imported.command,
       claimant: imported.claimant,
       claimDescribes: imported.describes,
-      claimDecision: choices[CLAIM_DECISION_ID] ?? null,
-      decision: choices[IMPORT_DECISION_ID] ?? null,
+      claimDecision: choices[`claim:${imported.key}`] ?? null,
+      decision: choices[`import:${imported.key}`] ?? null,
     });
   }
   return rows;
-}
-
-function vimInstalled(): boolean {
-  try {
-    const listed = JSON.parse(
-      fs.readFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), "utf8"),
-    ) as { identifier?: { id?: string } }[];
-    return listed.some((entry) => VIM_EXTENSIONS.includes(entry.identifier?.id ?? ""));
-  } catch {
-    return false;
-  }
-}
-
-function installExtension(id: string): boolean {
-  const result = spawnSync(
-    codeServerBin(),
-    [
-      "--install-extension",
-      id,
-      "--extensions-dir",
-      EXTENSIONS_DIR,
-      "--user-data-dir",
-      path.join(VSCODE_DIR, "user-data"),
-    ],
-    { stdio: "ignore" },
-  );
-  return result.status === 0;
-}
-
-/** The manager's screens, in order: single conflicts, then the catalog's
- * groups (related chords decided together), then whatever custom steps this
- * backend wants to offer. The page renders kinds; this composes them. */
-export function managerSteps(
-  provider: ShortcutProvider,
-  choices: Record<string, Decision>,
-  dismissed: Set<string>,
-  visible?: Set<string>,
-): ManagerStep[] {
-  const steps: ManagerStep[] = [];
-  const groups = new Map<string, ManagerRow[]>();
-  for (const row of managerRows(provider, choices)) {
-    // rows decided in an earlier session stay hidden; the set is fixed when
-    // the manager opens, so deciding a row mid-session never shifts the steps
-    if (visible && !visible.has(row.id)) continue;
-    const group = row.group;
-    if (!group || !CHORD_GROUPS[group]) {
-      steps.push({ kind: "conflict", row });
-      continue;
-    }
-    let members = groups.get(group);
-    if (!members) {
-      members = [];
-      groups.set(group, members);
-      steps.push({
-        kind: "group",
-        id: `group:${group}`,
-        title: CHORD_GROUPS[group].title,
-        rows: members,
-      });
-    }
-    members.push(row);
-  }
-  if (!dismissed.has("vim") && !vimInstalled()) {
-    steps.push({
-      kind: "custom",
-      id: "vim",
-      title: "vim keybindings",
-      body:
-        "No vim extension is installed. tode can install vscodevim, so vim motions work " +
-        "in the editor and closing the last tab with :q quits tode, the way vim would.",
-      actions: [
-        { id: "install", label: "install vscodevim" },
-        { id: "skip", label: "skip" },
-      ],
-    });
-  }
-  return steps;
-}
-
-/** Group actions stage a decision for every member; custom steps do their own
- * work. Everything stays in memory until the confirm screen writes it. */
-export function performStepAction(
-  provider: ShortcutProvider,
-  choices: Record<string, Decision>,
-  dismissed: Set<string>,
-  stepId: string,
-  actionId: string,
-): { note?: string } {
-  if (stepId === "vim") {
-    if (actionId === "install") {
-      if (!installExtension("vscodevim.vim")) {
-        return { note: "install failed — try: tode --install-extension vscodevim.vim" };
-      }
-      dismissed.add("vim");
-      return { note: "vscodevim installed — it activates on the next tode open" };
-    }
-    dismissed.add("vim");
-    return {};
-  }
-  return {};
 }
 
 /** The interactive manager is a web page in this very pane: terminal-browser
@@ -216,19 +98,22 @@ async function runManager(
 ): Promise<{ code: number; confirmed: boolean; reloadedLive: boolean; served: boolean }> {
   const { palette } = await readPalette();
   const staged: Record<string, Decision> = { ...(loadDecisions()?.choices ?? {}) };
-  const dismissed = new Set<string>();
   let confirmed = false;
   let reloadedLive = false;
   // every row is a step, decided or not — the manager always opens on step
   // one, with earlier decisions prefilled rather than hidden
   const manager = await startManager({
-    steps: () => managerSteps(provider, staged, dismissed),
-    allRows: () => managerRows(provider, staged),
+    rows: () => managerRows(provider, staged),
     taken: (chord) => {
       const terminal = provider.takenAs(chord);
       if (terminal) return { holder: `${terminal} (${provider.name})` };
       const imported = importedHolder(chord);
       if (imported) return { holder: `${imported} (imported)` };
+      // tode's own builtins hold their chords the same way any claimant does
+      const builtin = builtinKeybindings().find(
+        (bind) => !!bind.key && normalizeChord(bind.key) === chord,
+      );
+      if (builtin) return { holder: `${builtin.command} (tode)` };
       // a chord a staged claim-move already parked a command on is taken too
       for (const [id, decision] of Object.entries(staged)) {
         if (
@@ -258,10 +143,17 @@ async function runManager(
     normalize: normalizeChord,
     decide: (id, kind, decision, side) => {
       const claim = kind === "claim" || side === "claim";
-      const key = claim ? `claim:${id}` : kind === "import" ? IMPORT_DECISION_ID : id;
+      const key = claim ? `claim:${id}` : kind === "import" ? `import:${id}` : id;
       if (decision === null) {
         delete staged[key];
         return;
+      }
+      if (kind === "import" && decision.choice === "editor") {
+        // the builtin command the moved chord should carry rides on the
+        // decision, the same way a terminal row's editor move stages its own
+        decision.command =
+          builtinKeybindings().find((bind) => !!bind.key && normalizeChord(bind.key) === id)
+            ?.command ?? staged[key]?.command;
       }
       if (kind === "terminal") {
         const conflict = provider.scan().find((entry) => entry.editorId === id);
@@ -271,9 +163,9 @@ async function runManager(
           decision.action = conflict?.current ?? staged[key]?.action;
         }
         if (decision.choice === "editor") {
-          // derived rows are not in the catalog, so the command the editor
-          // side should carry rides on the decision itself
-          decision.command = conflict?.editor?.command ?? staged[key]?.command;
+          // the command the editor side should carry rides on the decision
+          // itself, staged from the conflict when the choice is made
+          decision.command = conflict?.editor.command ?? staged[key]?.command;
         }
       }
       if (claim) {
@@ -284,7 +176,6 @@ async function runManager(
       }
       staged[key] = decision;
     },
-    act: (stepId, actionId) => performStepAction(provider, staged, dismissed, stepId, actionId),
     confirm: () => {
       confirmed = true;
       applyDecisions(provider, provider.scan(), staged);
@@ -348,7 +239,7 @@ export async function firstRunShortcuts(): Promise<void> {
   const provider = providerFor();
   if (!provider || provider.ready() !== null) return;
   try {
-    if (provider.scan().length === 0 && !importedQuitConflict()) {
+    if (provider.scan().length === 0 && importedConflicts().length === 0) {
       markIntroShown();
       return;
     }
@@ -391,8 +282,8 @@ export async function shortcutsCommand(args: string[]): Promise<number> {
   }
 
   const conflicts = provider.scan();
-  const imported = importedQuitConflict();
-  if (conflicts.length === 0 && !imported) {
+  const imported = importedConflicts();
+  if (conflicts.length === 0 && imported.length === 0) {
     process.stdout.write(`${provider.name} already leaves every chord the editor needs alone\n`);
     return 0;
   }

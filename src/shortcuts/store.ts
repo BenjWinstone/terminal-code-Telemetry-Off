@@ -2,11 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "../runtime/paths";
-import { EDITOR_CHORDS } from "./catalog";
+import { extensionClaims } from "./imported";
 
 /** Where a chord should live: freed in the terminal, carried by another chord
  * on the editor side, or left exactly as it is. An editor decision remembers
- * which chord carries it, since it can be the suggestion or the user's own. */
+ * which chord carries it. */
 export interface Decision {
   choice: "terminal" | "editor" | "keep";
   key?: string;
@@ -15,8 +15,8 @@ export interface Decision {
   action?: string;
   /** For a claimant move: the binding's original when clause, carried along. */
   guard?: string;
-  /** For an editor move on a derived conflict — one the catalog does not
-   * know — the editor command the new chord should run. */
+  /** For an editor move: the editor command the new chord should run, staged
+   * from the conflict when the decision was made. */
   command?: string;
 }
 
@@ -52,6 +52,10 @@ export function clearDecisions(): void {
  * ctrl+q and ctrl+c only redirects. */
 export const QUIT_CHORD = process.platform === "darwin" ? "ctrl+c" : "ctrl+q";
 
+/** What the quit chord runs, wherever a decision carries it. Quitting always
+ * asks first. */
+export const QUIT_COMMAND = "tode.confirmQuit";
+
 /** The decision for the quit chord an *import* took, keyed apart from the
  * terminal conflict on the same chord so deciding one never erases the other. */
 export const IMPORT_DECISION_ID = `import:${QUIT_CHORD}`;
@@ -78,78 +82,86 @@ export function claimBindings(): { key: string; command: string; when?: string }
   return out;
 }
 
-/** The binding an import decision asks for. Written after the imported
+/** The bindings the import decisions ask for. Written after the imported
  * entries — vscode resolves keybindings.json bottom-up, last match wins — and
  * that ordering is the entire mechanism: nothing of the user's is edited or
- * removed for tode's chord to win. */
+ * removed for tode's chord to win. Import decisions exist per builtin chord
+ * ("import:<chord>"); the command each carries was staged when it was made,
+ * with the quit chord's known without one for decisions saved before that. */
 export function overrideBindings(): { key: string; command: string; when?: string }[] {
-  const decision = loadDecisions()?.choices[IMPORT_DECISION_ID];
-  if (decision?.choice !== "editor" || !decision.key) return [];
-  const quit = EDITOR_CHORDS.find((chord) => chord.id === QUIT_CHORD);
-  if (!quit) return [];
-  return [{ key: decision.key, command: quit.command, when: quit.when }];
+  const choices = loadDecisions()?.choices ?? {};
+  const out: { key: string; command: string; when?: string }[] = [];
+  for (const [id, decision] of Object.entries(choices)) {
+    if (!id.startsWith("import:")) continue;
+    if (decision.choice !== "editor" || !decision.key) continue;
+    const command = decision.command ?? (id === IMPORT_DECISION_ID ? QUIT_COMMAND : null);
+    if (!command) continue;
+    out.push({ key: decision.key, command, when: "!terminalFocus" });
+  }
+  return out;
 }
 
-/** Where the ctrl+c hint may fire: never in the terminal, never over a
- * selection or an input box — and never where a vim extension is actually
- * using ctrl+c. vscodevim needs it in insert mode (it is escape there), but
- * in normal mode it does nothing worth keeping, which is exactly where a
- * stray "I want to quit" ctrl+c happens. The context keys evaluate falsy
- * when no vim extension is installed, so the !vim.active branch keeps the
- * hint alive for everyone else. */
-export const HINT_WHEN =
-  // inputFocus is true inside the editor too, so it must not veto editor
-  // focus — only genuine input boxes (inputFocus without editorTextFocus)
-  "!terminalFocus && !editorHasSelection && (!inputFocus || editorTextFocus) && " +
-  "(vim.mode == 'Normal' || !vim.active) && neovim.mode != 'insert'";
+/** Where tode's ctrl+c bindings may fire at all: never in the terminal, never
+ * over a selection or an input box. inputFocus is true inside the editor too,
+ * so it must not veto editor focus — only genuine input boxes (inputFocus
+ * without editorTextFocus). */
+const HINT_BASE = "!terminalFocus && !editorHasSelection && (!inputFocus || editorTextFocus)";
+
+/** `base`, minus every context an installed extension declared for its own
+ * binding on the chord. tode's bindings live at user level and outrank any
+ * extension's, so this is how an extension keeps a chord it uses: its own
+ * when clause says exactly where the chord means something to it, and tode
+ * steps aside there — whichever extension it is. */
+export function carvedWhen(base: string | undefined, chord: string): string | undefined {
+  const carved = new Set(
+    extensionClaims(chord)
+      .filter((claim) => claim.when)
+      .map((claim) => `!(${claim.when})`),
+  );
+  const parts = [...(base ? [base] : []), ...carved];
+  return parts.length ? parts.join(" && ") : undefined;
+}
+
+/** The guard on tode's own quit binding. On macOS the quit chord doubles as
+ * the reflex ctrl+c, so it also carries the hint's contexts. */
+export function quitWhen(): string {
+  return carvedWhen(QUIT_CHORD === "ctrl+c" ? HINT_BASE : "!terminalFocus", QUIT_CHORD)!;
+}
+
+/** The guard on the ctrl+c redirect hint, where ctrl+c is not itself quit. */
+export function hintWhen(): string {
+  return carvedWhen(HINT_BASE, "ctrl+c")!;
+}
 
 /** The redirect hint exists only where ctrl+c is not itself the quit chord
- * (linux). It also lives at user level, above vscodevim's own ctrl+c. */
+ * (linux). It also lives at user level, above any extension's own ctrl+c. */
 export function hintBindings(): { key: string; command: string; when: string }[] {
   if (QUIT_CHORD === "ctrl+c") return [];
-  return [{ key: "ctrl+c", command: "tode.quitHint", when: HINT_WHEN }];
+  return [{ key: "ctrl+c", command: "tode.quitHint", when: hintWhen() }];
 }
 
 /** tode's quit chord written at user level, because extension keybindings
- * cannot be trusted to lose: vscodevim contributes ctrl+q for visual block
- * mode and shadows the bridge's own binding under editor focus. User
- * keybindings outrank every extension, so this one always wins — unless a
+ * cannot be trusted to lose under editor focus. User keybindings outrank
+ * every extension, so this one always wins inside its guard — unless a
  * wizard decision moved quit elsewhere (the fallback carries it then) or
  * surrendered it on purpose. */
 export function quitBindings(): { key: string; command: string; when?: string }[] {
   const choices = loadDecisions()?.choices ?? {};
   const decision = choices[IMPORT_DECISION_ID] ?? choices[QUIT_CHORD];
   if (decision?.choice === "editor" || decision?.choice === "keep") return [];
-  // quitting always asks first; on macOS the chord doubles as the reflex
-  // ctrl+c, so it carries the same guards the hint would
-  return [
-    {
-      key: QUIT_CHORD,
-      command: "tode.confirmQuit",
-      when: QUIT_CHORD === "ctrl+c" ? HINT_WHEN : "!terminalFocus",
-    },
-  ];
+  return [{ key: QUIT_CHORD, command: QUIT_COMMAND, when: quitWhen() }];
 }
 
 /** The keybindings the "editor" choices ask for, ready for keybindings.json.
+ * Each decision staged the command its chord should run when it was made.
  * Read at profile-install time, so a re-run of the wizard lands on the next
  * open without any other coordination. */
 export function fallbackBindings(): { key: string; command: string; when?: string }[] {
   const decisions = loadDecisions();
   if (!decisions) return [];
-  const catalog = EDITOR_CHORDS.flatMap((chord) => {
-    const decision = decisions.choices[chord.id];
-    const key = decision?.choice === "editor" ? decision.key ?? chord.suggestion : undefined;
-    if (!key) return [];
-    return [{ key, command: chord.command, when: chord.when }];
-  });
-  // derived conflicts are not in the catalog; their editor command was staged
-  // on the decision itself when it was made
-  const derived = Object.entries(decisions.choices).flatMap(([id, decision]) => {
+  return Object.entries(decisions.choices).flatMap(([id, decision]) => {
     if (id.startsWith("claim:") || id.startsWith("import:")) return [];
-    if (EDITOR_CHORDS.some((chord) => chord.id === id)) return [];
     if (decision.choice !== "editor" || !decision.key || !decision.command) return [];
     return [{ key: decision.key, command: decision.command, when: "!terminalFocus" }];
   });
-  return [...catalog, ...derived];
 }

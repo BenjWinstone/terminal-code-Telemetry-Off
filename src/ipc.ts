@@ -21,6 +21,10 @@ export interface OpenRequest {
   theme?: Record<string, unknown>;
 }
 
+/**
+ * 
+ * i think this is the flicker optimization/
+ */
 /** A tode window puts the address of its socket into every terminal it opens, so
  * running tode from inside tode changes that window instead of making another. */
 export function runningWindow(): string | null {
@@ -33,6 +37,7 @@ export function runningWindow(): string | null {
   }
 }
 
+// i guess send to window is gonna be sending to the extension?
 export function sendToWindow(socket: string, request: OpenRequest, timeoutMs = 4000): Promise<void> {
   return new Promise((resolve, reject) => {
     const connection = net.connect(socket);

@@ -7,7 +7,9 @@ import { foreignBindings, todeKeybindings } from "../profile";
 import type { Binding } from "../profile";
 import { extensionHolder } from "./imported";
 import type { FreedMove, ProviderConflict, ShortcutProvider } from "./provider";
+import { loadDecisions } from "./store";
 import { canonicalChord, defaultBinding } from "./vscode-keymap";
+import { words } from "./words";
 
 export function isGhostty(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.TERM_PROGRAM === "ghostty" || !!env.GHOSTTY_RESOURCES_DIR;
@@ -132,108 +134,6 @@ export function fromTrigger(trigger: string): string | null {
   return canonicalChord(parts.join("+"));
 }
 
-interface Target {
-  editorId: string;
-  trigger: string;
-  inTerminal: string;
-  short: string;
-  freed: string;
-  tradeoff: string;
-}
-
-/** Quit is a conflict only when someone's own config bound the chord — no
- * platform of ghostty ships either one bound — so these two ride in both
- * platform tables and the texts say so. */
-const QUIT_TARGETS: Target[] = [
-  {
-    editorId: "ctrl+q",
-    short: "runs your own bind",
-    freed: "your ctrl+q bind goes",
-    trigger: "ctrl+q",
-    inTerminal: "is bound in your Ghostty config, not by default, so quitting tode never reaches the editor",
-    tradeoff: "whatever you bound ctrl+q to in Ghostty stops working",
-  },
-  {
-    editorId: "ctrl+c",
-    short: "runs your own bind",
-    freed: "your ctrl+c bind goes",
-    trigger: "ctrl+c",
-    inTerminal: "is bound in your Ghostty config, not by default, so quitting tode never reaches the editor",
-    tradeoff: "whatever you bound ctrl+c to in Ghostty stops working",
-  },
-];
-
-/** What stands between Ghostty's shipped macOS defaults and the chords the
- * editor needs, checked against a live 1.3.1 install rather than assumed.
- * Every one of these silently substitutes a different byte sequence or
- * consumes the chord inside Ghostty itself, so the app never even sees a cmd
- * chord to have its own opinion about. */
-const MAC_TARGETS: Target[] = [
-  ...QUIT_TARGETS,
-  {
-    editorId: "cmd+w",
-    short: "close the pane",
-    freed: "panes close from the menu",
-    trigger: "super+w",
-    inTerminal: "closes the whole terminal pane, which can end a tode session by accident",
-    tradeoff: "close panes from Ghostty's menu or with the mouse instead",
-  },
-  {
-    // ghostty's undo is scoped to surfaces: per its docs it "can undo actions
-    // such as closing tabs or windows" (windows, tabs, splits), within
-    // undo-timeout — it never touches what a program in the terminal shows
-    editorId: "cmd+z",
-    short: "reopen a closed pane",
-    freed: "closed panes stay closed",
-    trigger: "super+z",
-    inTerminal: "undoes Ghostty's last close — restoring a closed window, tab or split",
-    tradeoff: "an accidentally closed Ghostty window, tab or split cannot be restored",
-  },
-  {
-    editorId: "cmd+shift+z",
-    short: "re-close a reopened pane",
-    freed: "no Ghostty redo",
-    trigger: "super+shift+z",
-    inTerminal: "redoes the close that Ghostty's undo just restored",
-    tradeoff: "Ghostty's redo of a restored close goes away",
-  },
-  {
-    editorId: "cmd+shift+t",
-    short: "reopen a Ghostty tab",
-    freed: "cmd+z reopens tabs",
-    trigger: "super+shift+t",
-    inTerminal: "reopens Ghostty's last closed tab, which duplicates its undo",
-    tradeoff: "reopen a closed Ghostty tab with cmd+z instead",
-  },
-  {
-    editorId: "cmd+a",
-    short: "select scrollback",
-    freed: "mouse selects scrollback",
-    trigger: "super+a",
-    inTerminal: "selects all of the terminal's own scrollback",
-    tradeoff: "select scrollback with the mouse instead",
-  },
-];
-
-/** Ghostty's linux defaults live on ctrl+shift chords, and leave undo, redo,
- * select_all and quit unbound — so the only shipped default that shadows an
- * editor chord is new_tab. */
-const LINUX_TARGETS: Target[] = [
-  ...QUIT_TARGETS,
-  {
-    editorId: "ctrl+shift+t",
-    short: "open a new tab",
-    freed: "tabs open from the menu",
-    trigger: "ctrl+shift+t",
-    inTerminal: "opens a new Ghostty tab, so reopening a closed editor never reaches the workbench",
-    tradeoff: "open new Ghostty tabs from the menu or your window manager instead",
-  },
-];
-
-export function targetsFor(platform: NodeJS.Platform = process.platform): Target[] {
-  return platform === "darwin" ? MAC_TARGETS : LINUX_TARGETS;
-}
-
 const HEADER = "# written by tode shortcuts — frees the chords the editor needs from ghostty\n";
 export const INCLUDE_LINE = "config-file = ?tode/keybinds.ghostty";
 const KEYBINDS_FILE = ["tode", "keybinds.ghostty"];
@@ -315,22 +215,6 @@ export function removeFreed(configDir: string): boolean {
   return changed;
 }
 
-/** A target is a conflict while the terminal still holds it, and stays listed
- * with current=null once tode's own file is what freed it. A chord the user
- * unbound themselves is not tode's to manage, so it does not appear at all. */
-export function conflictsFrom(
-  effective: Map<string, string>,
-  freed: Set<string>,
-  targets: Target[] = targetsFor(),
-): ProviderConflict[] {
-  return targets.flatMap((target): ProviderConflict[] => {
-    const current = effective.get(target.trigger);
-    if (freed.has(target.trigger)) return [{ ...target, current: null }];
-    if (current === undefined || current === "unbind" || current === "ignore") return [];
-    return [{ ...target, current }];
-  });
-}
-
 /** What the editor would run on each chord: the user's own keybindings first,
  * then tode's, then extension contributions, then the workbench defaults. Any
  * hit means a terminal bind on the chord takes something from the editor.
@@ -353,30 +237,6 @@ export function makeEditorHolds(): (chord: string) => { command: string; guard?:
     return null;
   };
 }
-
-export function editorHolds(chord: string): { command: string; guard?: string } | null {
-  return makeEditorHolds()(chord);
-}
-
-/** "workbench.action.reopenClosedEditor" -> "reopen closed editor",
- * "start_search" -> "start search": labels for rows nobody hand-wrote. A tail
- * too short to mean anything alone ("up", "toggle") keeps its parent. */
-function words(id: string): string {
-  const segments = id.split(".");
-  let tail = segments.pop() ?? id;
-  if (tail.length <= 6 && segments.length > 1) tail = `${segments.pop()} ${tail}`;
-  return tail
-    .replace(/_/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .trim();
-}
-
-/** Terminal actions that are usually worth more than the chord they sit on:
- * freeing them removes a core piece of the terminal, so the wizard's cursor
- * starts on keep rather than on freeing. */
-const PRECIOUS_ACTIONS =
-  /^(new_tab|new_window|new_split|close_surface|close_tab|close_window|goto_tab|goto_split|previous_tab|next_tab|toggle_fullscreen|toggle_tab_overview|quit)\b/;
 
 /** Byte rewrites (text:, csi:, esc:) substitute the sequence the editor-side
  * emulation already understands, so they are not conflicts; unbind and ignore
@@ -432,25 +292,28 @@ export function emitSequence(chord: string): string | null {
   return `esc:[27;${mods};${codepoint}~`;
 }
 
-/** Every conflict this terminal presents: the curated targets with their
- * hand-written copy, then everything else derived live — any bind that always
+/** What a freed trigger used to run. The live keybind table no longer knows —
+ * the free unbound it — but the decision that freed it kept the action. */
+function decidedAction(chord: string): string | null {
+  return loadDecisions()?.choices[chord]?.action ?? null;
+}
+
+/** Every conflict this terminal presents, derived live: any bind that always
  * consumes a chord the editor holds, whether it came from ghostty's defaults
  * or the user's own config. New ghostty releases and custom binds surface
  * here without anyone editing a table. */
 export function allConflicts(
   effective: Map<string, string>,
   freed: Set<string>,
-  targets: Target[] = targetsFor(),
   holds: (chord: string) => { command: string; guard?: string } | null = makeEditorHolds(),
+  past: (chord: string) => string | null = decidedAction,
 ): ProviderConflict[] {
-  const curated = conflictsFrom(effective, freed, targets);
-  const curatedTriggers = new Set(targets.map((target) => target.trigger));
-  const seen = new Set(curated.map((conflict) => conflict.editorId));
-  const derived: ProviderConflict[] = [];
+  const seen = new Set<string>();
+  const conflicts: ProviderConflict[] = [];
 
   const consider = (raw: string, action: string | null) => {
     const { trigger, passesThrough } = parseTrigger(raw);
-    if (passesThrough || curatedTriggers.has(trigger)) return;
+    if (passesThrough) return;
     if (action !== null && HARMLESS_ACTION.test(action)) return;
     const chord = fromTrigger(trigger);
     if (!chord || seen.has(chord)) return;
@@ -467,19 +330,21 @@ export function allConflicts(
     const held = holds(chord);
     if (!held) return;
     seen.add(chord);
-    const doing = action ? words(action) : "what it ran before";
-    derived.push({
+    // action is null for a trigger tode already freed; the decision that
+    // freed it remembers what it ran, so the texts can still name it
+    const ran = action ?? past(chord);
+    const doing = ran ? words(ran) : "what it ran before";
+    conflicts.push({
       editorId: chord,
       trigger,
       current: action,
       editor: {
         means: words(held.command),
         command: held.command,
-        when: "!terminalFocus",
-        recommend: action && PRECIOUS_ACTIONS.test(action) ? "keep" : "terminal",
-        // the label above is generated from the command id; the id and its
-        // guard are the real metadata, shown small under the label
-        detail: held.guard ? `${held.command}\nwhen ${held.guard}` : held.command,
+        // the label above is generated from the command id; the id and the
+        // source binding's own guard are the real metadata, shown small
+        // under the label
+        guard: held.guard,
       },
       short: doing,
       inTerminal: `runs ${doing} in Ghostty, so ${words(held.command)} never reaches the editor`,
@@ -495,7 +360,7 @@ export function allConflicts(
   for (const raw of freed) {
     if (!effective.has(raw)) consider(raw, null);
   }
-  return [...curated, ...derived];
+  return conflicts;
 }
 
 interface ProcessInfo {

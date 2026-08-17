@@ -1,3 +1,10 @@
+/**
+ * 
+ * ill definitely need to look into how we are writing to the ghostty config 
+ * file that is quite an important step that we don't want to mess up
+ * 
+ * also ideally we have at least also kitty, will test that when i do linux reivew
+ */
 function skipLineComment(source: string, at: number): number {
   const end = source.indexOf("\n", at);
   return end < 0 ? source.length : end;

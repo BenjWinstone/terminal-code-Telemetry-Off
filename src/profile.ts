@@ -7,7 +7,7 @@ import { CSS_FILE } from "./codeserver/server";
 import { FONT_FALLBACKS, injectedCss } from "./codeserver/inject";
 import { parseJsonc, readKey, setKeys } from "./jsonc";
 import { DATA_DIR } from "./runtime/paths";
-import { claimBindings, fallbackBindings, hintBindings, overrideBindings, quitBindings } from "./shortcuts/store";
+import { QUIT_CHORD, QUIT_COMMAND, carvedWhen, claimBindings, fallbackBindings, hintBindings, overrideBindings, quitBindings, quitWhen } from "./shortcuts/store";
 import { queryTerminal, withFallbacks } from "./terminal/osc";
 import type { TerminalPalette } from "./terminal/osc";
 import { hex } from "./theme/color";
@@ -16,7 +16,6 @@ import {
   generateTheme,
   paletteFingerprint,
   themeFingerprint,
-  surfaces,
 } from "./theme/generate";
 
 export const VSCODE_DIR = path.join(DATA_DIR, "vscode");
@@ -132,10 +131,9 @@ function writeIfChanged(file: string, contents: string): boolean {
   return true;
 }
 
-/** A vscode theme document — the shape generateTheme produces, and the shape
- * an actual theme file on disk parses to. Everything downstream of generation
- * speaks this, which is what lets a file and an inline theme travel the same
- * road. */
+/**
+ * sus
+ */
 export interface ThemeDocument {
   name?: string;
   type?: string;
@@ -160,7 +158,10 @@ export function installThemeJson(
   const already = fs.existsSync(path.join(dir, "themes", "tode-terminal.json"));
   if (!already) {
     const manifest = {
-      name: `tode-theme-${fingerprint}`,
+      // the folder carries the fingerprint so a palette change is a new path;
+      // the name stays stable so publisher.name always matches the id the
+      // registration claims (tode.tode-theme) — vscode validates that pair
+      name: "tode-theme",
       displayName: "tode terminal theme",
       publisher: "tode",
       version: "1.0.0",
@@ -265,7 +266,6 @@ const SETTINGS: Record<string, unknown> = {
   "workbench.tips.enabled": false,
   "workbench.welcomePage.walkthroughs.openOnInstall": false,
   "window.commandCenter": false,
-  "workbench.layoutControl.enabled": false,
   // The default title format ends in ${appName} — "code-server". The folder is
   // already on the window above this bar, so the file name is the only part
   // left worth showing. ${dirty} puts a dot in front of unsaved work.
@@ -296,23 +296,15 @@ const SEEDED: Record<string, unknown> = {
 /** The proxy reads this on each document, so a palette change reaches the page
  * on the next load without restarting anything. */
 export function installCss(palette: TerminalPalette): boolean {
-  const surface = surfaces(palette.background, palette.foreground);
-  return writeIfChanged(
-    CSS_FILE,
-    injectedCss(
-      hex(palette.background),
-      FONT_FAMILY,
-      { sidebar: hex(surface.sunken), line: hex(surface.raised) },
-    ),
-  );
+  return writeIfChanged(CSS_FILE, injectedCss(hex(palette.background), FONT_FAMILY));
 }
 
-/** The live slot holds a whole vscode theme document. Every open tode bridge
- * instance watches it and applies the theme's colours through the settings
- * API, which is what makes a change reflect without a reload — the contributed
- * theme extension only takes effect on the next one. Written on every open as
- * well as on a live change, so a fresh window gets full fidelity immediately
- * rather than waiting on the next terminal colour change to arrive. */
+/**
+ * 
+ * ill need to find where the extension code is, how that gets loaded, how code server is ran in the
+ * first place, and finally where it watches this theme content, and how it does the translation (does it miss anything?)
+ * 
+ */
 export function setLiveTheme(theme: ThemeDocument): boolean {
   return writeIfChanged(LIVE_THEME_FILE, `${JSON.stringify(theme)}\n`);
 }
@@ -382,13 +374,28 @@ const PANE_CHORDS: [string, string][] = [
   ["alt+w", "workbench.action.closeEditorsInGroup"],
 ];
 
+/** The chords tode itself ships, whatever the wizard decides: the pane chords
+ * and the quit machinery. Each carves out any context an installed extension
+ * declared for its own binding on the same chord, so an extension keeps a
+ * chord exactly where it said the chord means something to it. This is also
+ * what the wizard checks claimants against — an imported keybinding or a
+ * typed custom chord that lands on one of these is a conflict with tode
+ * itself, not with the terminal. */
+export function builtinKeybindings(): Binding[] {
+  return [
+    ...PANE_CHORDS.map(([key, command]) => ({ key, command, when: carvedWhen(undefined, key) })),
+    { key: QUIT_CHORD, command: QUIT_COMMAND, when: quitWhen() },
+    ...hintBindings(),
+  ];
+}
+
 /** The pane chords, then whatever the shortcut wizard decided belongs on the
  * editor side. There is deliberately no blanket cmd-to-ctrl transformation any
  * more: which chords need help differs per terminal and per user, and the
  * wizard (tode shortcuts) is where that gets decided, one chord at a time. */
 export function todeKeybindings(): unknown[] {
   return [
-    ...PANE_CHORDS.map(([key, command]) => ({ key, command })),
+    ...PANE_CHORDS.map(([key, command]) => ({ key, command, when: carvedWhen(undefined, key) })),
     ...quitBindings(),
     ...hintBindings(),
     ...fallbackBindings().map(({ key, command, when }) =>

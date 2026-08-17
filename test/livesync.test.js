@@ -303,12 +303,33 @@ test("a vscode theme file, comments and all, lands in the live slot and the exte
 });
 
 test("the browser main script turns a colours message into a theme at every window socket", async () => {
-  const { browserMainSource } = require("../dist/browserglue.js");
+  const { mainScriptSource } = require("../dist/browserglue.js");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-browser-main-"));
   const sockDir = path.join(dir, "ipc");
   fs.mkdirSync(sockDir);
+  const dist = path.resolve(__dirname, "..", "dist");
   const script = path.join(dir, "browser-main.js");
-  fs.writeFileSync(script, browserMainSource(path.resolve(__dirname, "..", "dist"), sockDir));
+  fs.writeFileSync(
+    script,
+    mainScriptSource({
+      socketDir: sockDir,
+      timingFile: path.join(dir, "timing.json"),
+      modules: {
+        livesync: path.join(dist, "livesync.js"),
+        generate: path.join(dist, "theme", "generate.js"),
+        ipc: path.join(dist, "ipc.js"),
+      },
+    }),
+  );
+  // the script requires electron for ipcMain; resolve it to a stub the same
+  // way the browser process would, through node_modules next to the script
+  const electronStub = path.join(dir, "node_modules", "electron");
+  fs.mkdirSync(electronStub, { recursive: true });
+  fs.writeFileSync(
+    path.join(electronStub, "index.js"),
+    "exports.subscribed = [];\n" +
+      "exports.ipcMain = { on(channel, listener) { exports.subscribed.push({ channel, listener }); } };\n",
+  );
 
   const received = [];
   const server = net.createServer((connection) => {
@@ -320,9 +341,13 @@ test("the browser main script turns a colours message into a theme at every wind
   const sock = path.join(sockDir, "w1.sock");
   await new Promise((r) => server.listen(sock, r));
   try {
-    const handlers = [];
-    require(script)({ onMessage: (cb) => handlers.push(cb) });
-    assert.equal(handlers.length, 1);
+    // the pinned build requires the module for its side effects; subscribing
+    // to tode's ipc channel is that side effect
+    require(script);
+    const electron = require(path.join(electronStub, "index.js"));
+    assert.equal(electron.subscribed.length, 1);
+    assert.equal(electron.subscribed[0].channel, "tode:message");
+    const handlers = [(message) => electron.subscribed[0].listener(null, message)];
 
     // junk does not crash and does not reach the socket
     handlers[0](null);

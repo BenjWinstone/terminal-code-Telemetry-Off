@@ -11,7 +11,7 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://tode.sh"),
-  title: "tode",
+  title: "terminal-browser",
   description: "VS Code inside your terminal.",
   twitter: {
     card: "summary_large_image",

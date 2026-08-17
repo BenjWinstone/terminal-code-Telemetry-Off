@@ -24,10 +24,12 @@ test("the import page server: page, import, done", async () => {
   try {
     assert.equal(page.served(), false, "nothing served yet");
     const html = await (await fetch(base)).text();
-    assert.match(html, /Import config from another editor/);
-    assert.match(html, /Cursor/);
+    assert.match(html, /terminal-browser import/);
     assert.match(html, /--bg: #14161a/, "the page draws with the terminal's tokens");
     assert.equal(page.served(), true);
+
+    const state = await (await fetch(`${base}/state`)).json();
+    assert.deepEqual(state.editors.map((editor) => editor.name), ["Cursor", "Code"]);
 
     const refused = await (await fetch(`${base}/import`, { method: "POST", body: JSON.stringify({ name: "Nope" }) })).json();
     assert.equal(refused.ok, false);

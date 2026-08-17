@@ -8,17 +8,14 @@ export interface ProviderConflict {
   /** The chord in this terminal's own config syntax. */
   trigger: string;
   current: string | null;
-  /** The editor's side of a conflict the provider derived itself — from the
-   * live terminal binds intersected with what the workbench actually binds —
-   * rather than one the hand-written catalog knows. Absent for catalog rows. */
-  editor?: {
+  /** The editor's side of the conflict, derived from the live terminal binds
+   * intersected with what the workbench actually binds. */
+  editor: {
     means: string;
     command: string;
-    when?: string;
-    recommend: "terminal" | "editor" | "keep";
-    suggestion?: string;
-    /** The command id and source guard the auto-label was derived from. */
-    detail?: string;
+    /** The when clause of the binding that holds the chord, when it has one —
+     * metadata for the page, alongside the command id itself. */
+    guard?: string;
   };
   inTerminal: string;
   /** The same as inTerminal but as a two-or-three word verb phrase, short

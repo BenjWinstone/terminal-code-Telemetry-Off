@@ -1,14 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { EXTENSIONS_DIR, foreignBindings } from "../profile";
-import { editorChord } from "./catalog";
-import { QUIT_CHORD } from "./store";
-
-/** Extensions whose quit-chord claims are resolved structurally: the hint and
- * quit bindings carry vim-mode guards, so each side gets the mode where the
- * chord means something to them, and there is nothing left to decide. */
-export const VIM_EXTENSIONS = ["vscodevim.vim", "asvetliakov.vscode-neovim"];
+import { EXTENSIONS_DIR, builtinKeybindings, foreignBindings } from "../profile";
 
 /** Chord equality the way vscode reads keys: modifier order and case do not
  * matter. */
@@ -39,6 +32,8 @@ export function importedHolder(chord: string): string | null {
 
 export interface ImportedConflict {
   key: string;
+  /** the tode builtin command this claim shadows */
+  builtin: string;
   command: string;
   /** who holds the chord: "imported" for keybindings.json, or the display
    * name of the extension that contributes it */
@@ -47,25 +42,40 @@ export interface ImportedConflict {
   describes?: string;
 }
 
-/** User keybindings outrank extension keybindings in vscode, so an imported
- * entry on the quit chord silently wins over tode.quit. The wizard surfaces
- * this as its own case, next to the terminal's. */
-export function importedQuitConflict(): ImportedConflict | null {
-  const quit = editorChord(QUIT_CHORD);
-  const command = importedHolder(quit.id);
-  if (command && command !== quit.command) return { key: quit.id, command, claimant: "imported" };
-  return extensionQuitClaim();
+/** Every claimant sitting on a chord tode itself binds — quit, the pane
+ * chords, all of them the same way. User keybindings outrank extension
+ * keybindings in vscode, and both are written above tode's, so a claim here
+ * silently wins over the builtin; the wizard surfaces each one next to the
+ * terminal's conflicts. A guarded extension claim is already split
+ * structurally — the builtin yields inside the claim's own when clause (see
+ * store.carvedWhen) — so only unguarded claims still need a decision. */
+export function importedConflicts(): ImportedConflict[] {
+  const out: ImportedConflict[] = [];
+  const seen = new Set<string>();
+  for (const bind of builtinKeybindings()) {
+    if (!bind.key || !bind.command || seen.has(bind.key)) continue;
+    seen.add(bind.key);
+    const command = importedHolder(bind.key);
+    if (command && command !== bind.command) {
+      out.push({ key: bind.key, builtin: bind.command, command, claimant: "imported" });
+      continue;
+    }
+    const held = extensionClaims(bind.key).find((claim) => !claim.when);
+    if (held && held.command !== bind.command) {
+      out.push({ key: bind.key, builtin: bind.command, ...held });
+    }
+  }
+  return out;
 }
 
-/** What an installed extension binds to this chord, or null. Every installed
- * extension's contributed keybindings are scanned — nothing is special-cased
- * to one chord — because any of them is the same kind of claimant an imported
- * keybinding is: another editor-side holder the user should hear about. */
+/** What an installed extension binds to a chord. Every installed extension's
+ * contributed keybindings are scanned — nothing is special-cased to one chord
+ * or one extension — because any of them is the same kind of claimant an
+ * imported keybinding is: another editor-side holder the user should hear
+ * about. */
 export interface ExtensionClaim {
   command: string;
   claimant: string;
-  /** the extension's id from extensions.json, like "vscodevim.vim" */
-  extensionId?: string;
   when?: string;
   /** the command's contributed title when the extension declares one, else
    * the command id cleaned up for reading */
@@ -134,7 +144,6 @@ function contributedKeybindings(): ContributedBinding[] {
         key,
         command: bind.command,
         claimant: pkg.displayName ?? pkg.name ?? "an extension",
-        extensionId: entry.identifier?.id,
         when: bind.when,
         describes: describeCommand(pkg, bind.command),
       });
@@ -144,18 +153,14 @@ function contributedKeybindings(): ContributedBinding[] {
   return bindings;
 }
 
-export function extensionHolder(chord: string): ExtensionClaim | null {
-  const found = contributedKeybindings().find((bind) => sameChord(bind.key, chord));
-  if (!found) return null;
-  const { key: _key, ...claim } = found;
-  return claim;
+/** Every extension binding on this chord, in install order. */
+export function extensionClaims(chord: string): ExtensionClaim[] {
+  return contributedKeybindings()
+    .filter((bind) => sameChord(bind.key, chord))
+    .map(({ key: _key, ...claim }) => claim);
 }
 
-export function extensionQuitClaim(): ImportedConflict | null {
-  const held = extensionHolder(QUIT_CHORD);
-  if (!held) return null;
-  // a vim extension's hold on ctrl+c is already split by mode guards — the
-  // wizard only surfaces contests that still need a decision
-  if (QUIT_CHORD === "ctrl+c" && VIM_EXTENSIONS.includes(held.extensionId ?? "")) return null;
-  return { key: QUIT_CHORD, ...held };
+export function extensionHolder(chord: string): ExtensionClaim | null {
+  return extensionClaims(chord)[0] ?? null;
 }
+

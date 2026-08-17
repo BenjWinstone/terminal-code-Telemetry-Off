@@ -13,8 +13,9 @@ export interface LaunchOptions {
   stages?: [string, number][];
 }
 
-/** Opens the workbench url in terminal-browser and stays until that pane
- * closes, feeding live terminal colour changes back into the profile. */
+/**
+ * extremly odd how we pass these flags for sure
+ */
 export function launchBrowser(
   runtime: Runtime,
   url: string,
@@ -28,11 +29,10 @@ export function launchBrowser(
   // url bar on cmd+l) would eat chords the editor binds — the whole point of
   // the shortcut wizard is that the editor gets what the terminal frees
   if (flags.has("--no-shortcuts")) argv.push("--no-shortcuts");
-  // newer than the pinned release; harmless to leave off until that lands
-  if (flags.has("--mirror-ctrl-digits")) argv.push("--mirror-ctrl-digits");
-  // a sign in flow would otherwise navigate the pane onto github and strand it
-  // there, with no toolbar to come back with
-  if (flags.has("--external-links")) argv.push("--external-links");
+  // with no tab strip, a target=_blank or a sign-in window.open would land in
+  // a tab the user can never see or reach; as a popup stack it stays on the
+  // pane, over the editor
+  if (flags.has("--open-tabs-in-popup-stack")) argv.push("--open-tabs-in-popup-stack");
   // lets a genuine terminal theme change reach every open window without a
   // reload: the preload hears it, the main script turns it into a theme and
   // tells each window's bridge over its socket

@@ -18,6 +18,9 @@ export interface ServerState {
   version: string;
   startedAt: number;
 }
+/**
+ * this is odd i would say
+ */
 
 export const CSS_FILE = path.join(DATA_DIR, "inject.css");
 // kept apart from the run state, which is cleared on every stop
@@ -34,6 +37,9 @@ function fontAsset(): string {
 export function codeServerBin(): string {
   const found = installedCodeServer();
   if (found) return found;
+  /**
+   * stupid ass error
+   */
   throw new Error(
     "no code-server on this machine yet — run `tode provision` to fetch the pinned build, " +
       "or set TODE_CODE_SERVER to one you installed yourself",

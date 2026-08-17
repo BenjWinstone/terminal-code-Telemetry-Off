@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
-const { createInjector, injectedCss, FONT_ROUTE, TIMING_ROUTE } = require("../dist/codeserver/inject.js");
+const { createInjector, injectedCss, FONT_ROUTE } = require("../dist/codeserver/inject.js");
 
 const listen = (server) =>
   new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
@@ -219,7 +219,7 @@ test("the font is served by the proxy so no system install is needed", async () 
 
 const CSP = "default-src 'self'; script-src 'self' 'nonce-1nline-m4p'; style-src 'self' 'unsafe-inline'";
 
-test("the timing script carries the page's own csp nonce", async () => {
+test("the proxy injects css and never a script", async () => {
   await withPair(
     (_request, response) => {
       response.writeHead(200, { "content-type": "text/html", "content-security-policy": CSP });
@@ -227,37 +227,8 @@ test("the timing script carries the page's own csp nonce", async () => {
     },
     async ({ proxyPort }) => {
       const { body } = await get(proxyPort, { accept: "text/html" });
-      assert.match(body, /<script nonce="1nline-m4p">/, "without the nonce the browser drops it silently");
-      assert.match(body, new RegExp(TIMING_ROUTE.replace("/", "\\/")));
-    },
-  );
-});
-
-test("no nonce means no script rather than one that is silently blocked", async () => {
-  await withPair(
-    (_request, response) => {
-      response.writeHead(200, { "content-type": "text/html" });
-      response.end("<html><head></head></html>");
-    },
-    async ({ proxyPort }) => {
-      const { body } = await get(proxyPort, { accept: "text/html" });
-      assert.doesNotMatch(body, /<script/);
-      assert.match(body, /tode-injected/, "the css still goes in, style-src allows inline");
-    },
-  );
-});
-
-test("the page can post its timings back", async () => {
-  await withPair(
-    (_request, response) => response.end("unused"),
-    async ({ proxyPort, cssFile }) => {
-      const payload = JSON.stringify({ at: 1, marks: { "code/didStartWorkbench": 500 } });
-      const response = await fetch(`http://127.0.0.1:${proxyPort}${TIMING_ROUTE}`, {
-        method: "POST",
-        body: payload,
-      });
-      assert.equal(response.status, 204);
-      assert.equal(fs.readFileSync(`${cssFile}.timing.json`, "utf8"), payload);
+      assert.match(body, /tode-injected/, "the css goes in, style-src allows inline");
+      assert.doesNotMatch(body, /<script/, "scripting is the preload's and the browser's job");
     },
   );
 });
@@ -292,81 +263,8 @@ test("a request waits while code-server is still booting, then goes through", as
   }
 });
 
-test("the empty editor gets tode's own panel instead of the watermark", () => {
-  const css = injectedCss("#101010", "JetBrains Mono", undefined, {
-    accent: "#49aeff",
-    text: "#cfcfcf",
-    faint: "#8a8a8a",
-    rule: "#242424",
-  });
-  assert.match(css, /\.letterpress\{display:none;\}/, "the greyed out picture goes");
-  assert.match(css, /content:"tode"/);
-  assert.match(css, /go to file/);
-});
-
-test("newlines in css content keep their terminating space", () => {
-  const css = injectedCss("#101010", "JetBrains Mono", undefined, {
-    accent: "#49aeff",
-    text: "#cfcfcf",
-    faint: "#8a8a8a",
-    rule: "#242424",
-  });
-  // a css escape runs until whitespace, so "\A" then a letter is read as a hex
-  // code point: "\Actrl" becomes U+00AC followed by "trl"
-  assert.doesNotMatch(css, /\\A[0-9a-fA-F]/, "an escape must not be followed by a hex digit");
-  assert.match(css, /\\A ctrl/, "each line break needs its terminating space");
-});
-
-test("no welcome colours means the watermark is left alone", () => {
+test("the empty editor stays empty: the watermark is always hidden", () => {
   const css = injectedCss("#101010", "JetBrains Mono");
-  assert.doesNotMatch(css, /letterpress/);
-  assert.doesNotMatch(css, /content:"tode"/);
+  assert.match(css, /\.editor-group-watermark\{display:none !important;\}/);
 });
 
-test("only http and https are handed to the desktop", () => {
-  const { openExternally } = require("../dist/codeserver/inject.js");
-  const prev = process.env.TODE_NO_OPEN;
-  process.env.TODE_NO_OPEN = "1";
-  try {
-    assert.equal(openExternally("https://github.com/login"), true);
-    assert.equal(openExternally("http://example.com"), true);
-    // anything else reaching a shell-adjacent api is not worth the risk
-    assert.equal(openExternally("file:///etc/passwd"), false);
-    assert.equal(openExternally("javascript:alert(1)"), false);
-    assert.equal(openExternally("vscode-remote://x/y"), false);
-    assert.equal(openExternally("not a url"), false);
-    assert.equal(openExternally(""), false);
-  } finally {
-    if (prev === undefined) delete process.env.TODE_NO_OPEN;
-    else process.env.TODE_NO_OPEN = prev;
-  }
-});
-
-test("the page posts an off-origin url and the injector takes it", async () => {
-  const prev = process.env.TODE_NO_OPEN;
-  process.env.TODE_NO_OPEN = "1";
-  try {
-    await withPair(
-      (_request, response) => response.end("unused"),
-      async ({ proxyPort, cssFile }) => {
-        const response = await fetch(`http://127.0.0.1:${proxyPort}/__tode/external`, {
-          method: "POST",
-          body: "https://github.com/login/device",
-        });
-        assert.equal(response.status, 204);
-        assert.equal(fs.readFileSync(`${cssFile}.external.txt`, "utf8"), "https://github.com/login/device");
-      },
-    );
-  } finally {
-    if (prev === undefined) delete process.env.TODE_NO_OPEN;
-    else process.env.TODE_NO_OPEN = prev;
-  }
-});
-
-test("the injected script only diverts other origins", () => {
-  const { timingScript } = require("../dist/codeserver/inject.js");
-  const script = timingScript("n0nce");
-  assert.match(script, /window\.open = function/);
-  assert.match(script, /there\.origin !== here\.origin/);
-  assert.match(script, /protocol !== 'http:' && there\.protocol !== 'https:'/);
-});

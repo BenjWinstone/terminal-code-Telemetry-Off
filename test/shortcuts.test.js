@@ -53,27 +53,25 @@ test("freeing chords writes only tode's file and one include line, and undoes cl
 });
 
 test("only chords bound to something other than unbind or ignore are conflicts", () => {
-  const { conflictsFrom, parseKeybinds, targetsFor } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const holds = (chord) =>
+    ({
+      "cmd+backspace": { command: "deleteAllLeft" },
+      "cmd+z": { command: "undo" },
+      "cmd+w": { command: "workbench.action.closeActiveEditor" },
+    })[chord] ?? null;
   const shipped = parseKeybinds(
     ["keybind = super+backspace=unbind", "keybind = super+z=ignore", "keybind = super+w=close_surface"].join("\n"),
   );
-  const conflicts = conflictsFrom(shipped, new Set(), targetsFor("darwin"));
+  const conflicts = allConflicts(shipped, new Set(), holds);
   assert.equal(conflicts.some((c) => c.trigger === "super+backspace"), false, "already unbound");
   assert.equal(conflicts.some((c) => c.trigger === "super+z"), false, "already ignored");
   assert.deepEqual(conflicts.map((c) => c.trigger), ["super+w"]);
 });
 
 test("a chord ghostty never bound at all is not a conflict", () => {
-  const { conflictsFrom } = require("../dist/shortcuts/ghostty.js");
-  assert.deepEqual(conflictsFrom(new Map(), new Set()), []);
-});
-
-test("a chord tode already freed stays listed, marked as ours", () => {
-  const { conflictsFrom, targetsFor } = require("../dist/shortcuts/ghostty.js");
-  const effective = new Map([["super+w", "unbind"]]);
-  const conflicts = conflictsFrom(effective, new Set(["super+w"]), targetsFor("darwin"));
-  assert.equal(conflicts.length, 1);
-  assert.equal(conflicts[0].current, null, "freed by tode, so there is no current action");
+  const { allConflicts } = require("../dist/shortcuts/ghostty.js");
+  assert.deepEqual(allConflicts(new Map(), new Set(), () => ({ command: "undo" })), []);
 });
 
 test("the exact regression: what ghostty 1.3.1 actually ships for these", () => {
@@ -82,7 +80,19 @@ test("the exact regression: what ghostty 1.3.1 actually ships for these", () => 
   // The text: rewrites (cmd+left/right/backspace) are deliberately NOT
   // conflicts: they reach the editor as ctrl+a/ctrl+e/ctrl+u, which vscode's
   // mac keymap already understands, so the behaviour survives the rewrite.
-  const { parseKeybinds, conflictsFrom, targetsFor } = require("../dist/shortcuts/ghostty.js");
+  const { parseKeybinds, allConflicts } = require("../dist/shortcuts/ghostty.js");
+  // what the mac workbench holds on these, keyed by canonical chord
+  const holds = (chord) =>
+    ({
+      "cmd+z": { command: "undo" },
+      "shift+cmd+z": { command: "redo" },
+      "shift+cmd+t": { command: "workbench.action.reopenClosedEditor" },
+      "cmd+a": { command: "editor.action.selectAll" },
+      "cmd+w": { command: "workbench.action.closeActiveEditor" },
+      "cmd+left": { command: "cursorHome" },
+      "cmd+right": { command: "cursorEnd" },
+      "cmd+backspace": { command: "deleteAllLeft" },
+    })[chord] ?? null;
   const shipped = parseKeybinds([
     "keybind = super+arrow_right=text:\\\\x05",
     "keybind = super+arrow_left=text:\\\\x01",
@@ -93,7 +103,7 @@ test("the exact regression: what ghostty 1.3.1 actually ships for these", () => 
     "keybind = super+a=select_all",
     "keybind = super+w=close_surface",
   ].join("\n"));
-  const conflicts = conflictsFrom(shipped, new Set(), targetsFor("darwin"));
+  const conflicts = allConflicts(shipped, new Set(), holds);
   assert.equal(conflicts.length, 5, "the action binds are flagged, the text rewrites are not");
   assert.ok(!conflicts.some((c) => c.trigger.includes("arrow") || c.trigger.includes("backspace")));
 });
@@ -101,23 +111,27 @@ test("the exact regression: what ghostty 1.3.1 actually ships for these", () => 
 test("linux ghostty defaults: new_tab is the conflict, the ctrl+shift pairs are not", () => {
   // pinned from ghostty's linux defaults: ctrl+shift chords, with undo, redo,
   // select_all and quit unbound
-  const { parseKeybinds, conflictsFrom, targetsFor } = require("../dist/shortcuts/ghostty.js");
-  const { editorChord } = require("../dist/shortcuts/catalog.js");
+  const { parseKeybinds, allConflicts } = require("../dist/shortcuts/ghostty.js");
+  const holds = (chord) =>
+    ({
+      "ctrl+shift+t": { command: "workbench.action.reopenClosedEditor" },
+      "ctrl+q": { command: "tode.confirmQuit" },
+    })[chord] ?? null;
   const shipped = parseKeybinds([
     "keybind = ctrl+shift+t=new_tab",
     "keybind = ctrl+shift+w=close_surface",
     "keybind = ctrl+shift+c=copy_to_clipboard",
     "keybind = ctrl+shift+v=paste_from_clipboard",
   ].join("\n"));
-  const conflicts = conflictsFrom(shipped, new Set(), targetsFor("linux"));
+  const conflicts = allConflicts(shipped, new Set(), holds);
   assert.deepEqual(conflicts.map((c) => c.trigger), ["ctrl+shift+t"], "only new_tab shadows an editor chord");
-  // and the id it names resolves in the catalog
-  for (const conflict of conflicts) editorChord(conflict.editorId);
 
-  // quit chords surface only for someone whose own config bound them
+  // the quit chord surfaces only for someone whose own config bound it,
+  // because tode's own quit binding is what the editor holds there
   const custom = parseKeybinds(["keybind = ctrl+q=quit"].join("\n"));
-  const quit = conflictsFrom(custom, new Set(), targetsFor("linux"));
+  const quit = allConflicts(custom, new Set(), holds);
   assert.deepEqual(quit.map((c) => c.trigger), ["ctrl+q"]);
+  assert.equal(quit[0].editor.means, "confirm quit", "the label derives from the command id");
 });
 
 test("a move writes the unbind and the rebind, carrying the action", () => {
@@ -137,33 +151,6 @@ test("the include line survives a config with no trailing newline", () => {
   const out = withInclude("window-save-state = always");
   assert.equal(out.split("\n").filter((l) => l.startsWith("config-file")).length, 1);
   assert.ok(out.includes("window-save-state = always\nconfig-file"), "must not run onto the same line");
-});
-
-test("every ghostty target on both platforms names a chord the catalog actually has", () => {
-  const { conflictsFrom, targetsFor } = require("../dist/shortcuts/ghostty.js");
-  const { editorChord } = require("../dist/shortcuts/catalog.js");
-  for (const platform of ["darwin", "linux"]) {
-    const targets = targetsFor(platform);
-    const triggers = targets.map((target) => target.trigger);
-    const conflicts = conflictsFrom(new Map(), new Set(triggers), targets);
-    assert.equal(conflicts.length, triggers.length, `a freed trigger must stay listed on ${platform}`);
-    // editorChord throws on an id the catalog does not know
-    for (const conflict of conflicts) editorChord(conflict.editorId);
-  }
-});
-
-test("every catalog entry can carry its command, and suggestions avoid cmd", () => {
-  const { EDITOR_CHORDS } = require("../dist/shortcuts/catalog.js");
-  for (const chord of EDITOR_CHORDS) {
-    assert.ok(chord.command.length > 0, `${chord.id} has no editor command`);
-    assert.ok(["terminal", "editor", "keep"].includes(chord.recommend));
-    if (chord.suggestion) {
-      assert.ok(!chord.suggestion.includes("cmd"), `${chord.id} suggests a cmd chord`);
-    }
-    if (chord.recommend === "editor") {
-      assert.ok(chord.suggestion, `${chord.id} recommends the editor side but suggests nothing`);
-    }
-  }
 });
 
 test("typed chords normalize into mod order, or are rejected", () => {
@@ -253,8 +240,8 @@ test("the platform keymap answers with this platform's chords", () => {
   assert.notEqual(defaultBinding(other)?.command, "actions.find");
 });
 
-test("derived conflicts: a bind on a chord the editor holds surfaces without a catalog entry", () => {
-  const { allConflicts, parseKeybinds, targetsFor } = require("../dist/shortcuts/ghostty.js");
+test("derived conflicts: a bind on a chord the editor holds surfaces, nothing else does", () => {
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
   const holds = (chord) =>
     ({
       "cmd+f": { command: "actions.find" },
@@ -273,15 +260,14 @@ test("derived conflicts: a bind on a chord the editor holds surfaces without a c
     "keybind = super+g=navigate_search:next",
     "keybind = super+y=some_action_nobody_heard_of",
   ].join("\n"));
-  const conflicts = allConflicts(live, new Set(), targetsFor("darwin"), holds);
+  const conflicts = allConflicts(live, new Set(), holds);
 
   const byId = new Map(conflicts.map((c) => [c.editorId, c]));
   assert.ok(byId.get("cmd+f"), "a new ghostty default is detected with no table change");
   assert.equal(byId.get("cmd+f").editor.command, "actions.find");
-  assert.equal(byId.get("cmd+f").editor.recommend, "terminal");
   assert.ok(byId.get("shift+cmd+p"), "the command palette chord is detected");
-  assert.equal(byId.get("cmd+t").editor.recommend, "keep", "a precious terminal action starts on keep");
-  assert.ok(!byId.get("cmd+w").editor, "a curated trigger keeps its hand-written copy");
+  assert.equal(byId.get("cmd+w").editor.command, "workbench.action.closeActiveEditor");
+  assert.equal(byId.get("cmd+w").editor.means, "close active editor");
   assert.ok(!byId.has("cmd+e"), "state-dependent actions pass through, so they are not conflicts");
   assert.ok(!byId.has("shift+left"), "selection adjustment passes through");
   assert.ok(!byId.has("cmd+left"), "text rewrites are emulation, not conflicts");
@@ -294,14 +280,14 @@ test("macOS native tab cycling frees by rebinding to bytes — an unbind hands i
   // runs. A bound trigger stays ghostty's, so freeing writes a rebind that
   // emits the chord itself; unbinding would change nothing.
   if (process.platform !== "darwin") return;
-  const { allConflicts, parseKeybinds, targetsFor } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
   const holds = () => ({ command: "workbench.action.quickOpenNavigateNext" });
   const live = parseKeybinds([
     "keybind = ctrl+tab=next_tab",
     "keybind = ctrl+shift+tab=previous_tab",
   ].join("\n"));
   const { withEmits } = require("../dist/shortcuts/ghostty.js");
-  const conflicts = allConflicts(live, new Set(), targetsFor("darwin"), holds);
+  const conflicts = allConflicts(live, new Set(), holds);
   assert.deepEqual(conflicts.map((c) => c.editorId), ["ctrl+tab", "ctrl+shift+tab"]);
   // freeing those rows completes into emit rebinds — on a live free (action
   // from the scan) and on a re-apply (action kept by the decision) alike
@@ -346,7 +332,7 @@ test("emit rebinds are written instead of unbind, and count as freed", () => {
 });
 
 test("derived conflicts: custom binds and prefixes behave", () => {
-  const { allConflicts, parseKeybinds, targetsFor } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
   const holds = (chord) => (chord === "cmd+p" ? { command: "workbench.action.quickOpen" } : null);
   const live = parseKeybinds([
     "keybind = super+p=toggle_tab_overview",
@@ -354,21 +340,26 @@ test("derived conflicts: custom binds and prefixes behave", () => {
   ].join("\n"));
   // the plain bind conflicts; the performable spelling of the same trigger
   // passes through and must not double-report
-  const conflicts = allConflicts(live, new Set(), targetsFor("darwin"), holds);
+  const conflicts = allConflicts(live, new Set(), holds);
   assert.equal(conflicts.filter((c) => c.editorId === "cmd+p").length, 1);
 
   const passing = parseKeybinds(["keybind = performable:super+p=toggle_tab_overview"].join("\n"));
-  assert.deepEqual(allConflicts(passing, new Set(), targetsFor("darwin"), holds), []);
+  assert.deepEqual(allConflicts(passing, new Set(), holds), []);
 });
 
-test("a freed derived chord stays listed, and an editor move carries its command", () => {
-  const { allConflicts, targetsFor } = require("../dist/shortcuts/ghostty.js");
+test("a freed chord stays listed, and the freeing decision recalls its action", () => {
+  const { allConflicts } = require("../dist/shortcuts/ghostty.js");
   const holds = (chord) => (chord === "cmd+f" ? { command: "actions.find" } : null);
   const freed = new Set(["super+f"]);
-  const conflicts = allConflicts(new Map([["super+f", "unbind"]]), freed, targetsFor("darwin"), holds);
+  const past = (chord) => (chord === "cmd+f" ? "start_search" : null);
+  const conflicts = allConflicts(new Map([["super+f", "unbind"]]), freed, holds, past);
   assert.equal(conflicts.length, 1);
   assert.equal(conflicts[0].current, null, "freed by tode, so no current action");
   assert.equal(conflicts[0].editor.command, "actions.find");
+  assert.equal(conflicts[0].short, "start search", "the texts still name what the trigger ran");
+
+  const forgotten = allConflicts(new Map([["super+f", "unbind"]]), freed, holds, () => null);
+  assert.equal(forgotten[0].short, "what it ran before", "with nothing to recall, say so");
 });
 
 test("derived editor decisions write keybindings through the command on the decision", () => {
@@ -410,8 +401,8 @@ test("editor-side decisions become keybindings, terminal and keep do not", () =>
       terminal: "ghostty",
       choices: {
         "cmd+w": { choice: "terminal" },
-        "cmd+shift+z": { choice: "editor", key: "ctrl+shift+z" },
-        "cmd+a": { choice: "editor", key: "ctrl+alt+a" },
+        "cmd+shift+z": { choice: "editor", key: "ctrl+shift+z", command: "redo" },
+        "cmd+a": { choice: "editor", key: "ctrl+alt+a", command: "editor.action.selectAll" },
         "cmd+z": { choice: "keep" },
       },
     });
@@ -446,30 +437,38 @@ test("editor-side decisions become keybindings, terminal and keep do not", () =>
   }
 });
 
-test("an imported binding on ctrl+q is a conflict; removals and tode's own are not", () => {
+test("an imported binding on any tode builtin is a conflict; removals and tode's own are not", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-import-scan-"));
   const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_DATA_HOME = path.join(home, "share");
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const { USER_DIR } = freshRequire("../dist/profile.js");
-    const { importedQuitConflict, importedHolder } = require("../dist/shortcuts/imported.js");
+    const { importedConflicts, importedHolder } = require("../dist/shortcuts/imported.js");
     const { QUIT_CHORD } = require("../dist/shortcuts/store.js");
     const file = path.join(USER_DIR, "keybindings.json");
     fs.mkdirSync(USER_DIR, { recursive: true });
+    const quit = () => importedConflicts().find((c) => c.key === QUIT_CHORD) ?? null;
 
     fs.writeFileSync(file, JSON.stringify([{ key: "ctrl+shift+p", command: "other" }]));
-    assert.equal(importedQuitConflict(), null, "a binding elsewhere is no conflict");
+    assert.deepEqual(importedConflicts(), [], "a binding elsewhere is no conflict");
 
     fs.writeFileSync(file, JSON.stringify([{ key: QUIT_CHORD.toUpperCase(), command: "workbench.action.terminal.toggle" }]));
-    const conflict = importedQuitConflict();
-    assert.equal(conflict.command, "workbench.action.terminal.toggle", "case does not hide a conflict");
+    assert.equal(quit().command, "workbench.action.terminal.toggle", "case does not hide a conflict");
+    assert.equal(quit().builtin, "tode.confirmQuit", "the shadowed builtin rides along");
 
     fs.writeFileSync(file, JSON.stringify([{ key: QUIT_CHORD, command: "-workbench.action.something" }]));
-    assert.equal(importedQuitConflict(), null, "a removal entry holds nothing");
+    assert.equal(quit(), null, "a removal entry holds nothing");
 
     fs.writeFileSync(file, JSON.stringify([{ key: QUIT_CHORD, command: "tode.confirmQuit", when: "!terminalFocus" }]));
-    assert.equal(importedQuitConflict(), null, "a hand-written tode bind is not a conflict");
+    assert.equal(quit(), null, "a hand-written tode bind is not a conflict");
+
+    // the pane chords are tode builtins too — defended exactly like quit,
+    // nothing special-cased to one chord
+    fs.writeFileSync(file, JSON.stringify([{ key: "alt+w", command: "whatever.the.user.bound" }]));
+    const pane = importedConflicts().find((c) => c.key === "alt+w");
+    assert.equal(pane.builtin, "workbench.action.closeEditorsInGroup");
+    assert.equal(pane.claimant, "imported");
 
     fs.writeFileSync(file, JSON.stringify([{ key: "shift+ctrl+q", command: "taken" }]));
     assert.equal(importedHolder("ctrl+shift+q"), "taken", "modifier order does not hide a holder");
@@ -488,8 +487,8 @@ test("an extension that contributes ctrl+q is a claimant, named by its display n
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const { EXTENSIONS_DIR } = freshRequire("../dist/profile.js");
-    const { extensionQuitClaim, importedQuitConflict } = require("../dist/shortcuts/imported.js");
-    assert.equal(extensionQuitClaim(), null, "no extensions installed, no claim");
+    const { importedConflicts } = require("../dist/shortcuts/imported.js");
+    assert.deepEqual(importedConflicts(), [], "no extensions installed, no claim");
 
     const vimDir = path.join(EXTENSIONS_DIR, "vscodevim.vim-1.30.0");
     fs.mkdirSync(vimDir, { recursive: true });
@@ -522,14 +521,29 @@ test("an extension that contributes ctrl+q is a claimant, named by its display n
     assert.equal(extensionHolder("ctrl+q").describes, "vim winCtrlQ", "the id is cleaned when no title exists");
     assert.equal(extensionHolder("ctrl+x"), null);
 
-    if (QUIT_CHORD === "ctrl+c") {
-      // a vim extension's ctrl+c is resolved by the mode guards, so it is
-      // not surfaced as a wizard conflict on macOS
-      assert.equal(extensionQuitClaim(), null);
-    } else {
-      assert.equal(extensionQuitClaim().claimant, "Vim");
-      assert.equal(importedQuitConflict().claimant, "Vim");
-    }
+    // a guarded claim on the quit chord is split structurally — tode's own
+    // binding yields inside the claimant's when clause — so nothing surfaces
+    assert.deepEqual(importedConflicts(), []);
+
+    // an unguarded claim would be shadowed whole, so it still needs a decision
+    const acmeDir = path.join(EXTENSIONS_DIR, "acme.keys-1.0.0");
+    fs.mkdirSync(acmeDir, { recursive: true });
+    fs.writeFileSync(path.join(acmeDir, "package.json"), JSON.stringify({
+      name: "keys",
+      displayName: "Acme Keys",
+      contributes: { keybindings: [{ key: QUIT_CHORD, command: "acme.everything" }] },
+    }));
+    const manifest = path.join(EXTENSIONS_DIR, "extensions.json");
+    fs.writeFileSync(manifest, JSON.stringify([
+      { identifier: { id: "tode.tode-bridge" }, relativeLocation: "tode.tode-bridge-1.2.0" },
+      { identifier: { id: "vscodevim.vim" }, relativeLocation: "vscodevim.vim-1.30.0" },
+      { identifier: { id: "acme.keys" }, relativeLocation: "acme.keys-1.0.0" },
+    ]));
+    // the claim scan caches on the manifest's mtime; make the rewrite visible
+    fs.utimesSync(manifest, new Date(), new Date(Date.now() + 5000));
+    const claim = importedConflicts().find((c) => c.key === QUIT_CHORD);
+    assert.equal(claim.claimant, "Acme Keys");
+    assert.equal(claim.builtin, "tode.confirmQuit");
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -550,7 +564,11 @@ test("the quit chord lives at user level, unless a decision moved or surrendered
     assert.equal(bindings[0].key, store.QUIT_CHORD);
     assert.equal(bindings[0].command, "tode.confirmQuit", "quitting always asks first");
     if (store.QUIT_CHORD === "ctrl+c") {
-      assert.match(bindings[0].when, /vim\.mode == 'Normal'/, "the reflex chord carries the vim guards");
+      assert.equal(
+        bindings[0].when,
+        "!terminalFocus && !editorHasSelection && (!inputFocus || editorTextFocus)",
+        "the reflex chord carries the hint contexts",
+      );
       assert.deepEqual(store.hintBindings(), [], "no redirect where ctrl+c is quit itself");
     } else {
       assert.equal(bindings[0].when, "!terminalFocus");
@@ -581,6 +599,45 @@ test("the quit chord lives at user level, unless a decision moved or surrendered
       { key: store.QUIT_CHORD, command: "-extension.vim_winCtrlQ" },
       { key: "ctrl+alt+v", command: "extension.vim_winCtrlQ", when: "editorTextFocus && vim.active" },
     ], "a moved claim removes the old rule and re-adds it at the new chord");
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("tode's quit guard yields wherever an extension's own claim declares itself", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-yield-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const { EXTENSIONS_DIR } = freshRequire("../dist/profile.js");
+    const store = require("../dist/shortcuts/store.js");
+    const dir = path.join(EXTENSIONS_DIR, "vscodevim.vim-1.30.0");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({
+      name: "vim",
+      contributes: { keybindings: [
+        { key: store.QUIT_CHORD, command: "extension.vim_quit", when: "editorTextFocus && vim.active" },
+        { key: "ctrl+c", command: "extension.vim_escape", when: "vim.mode == 'Insert'" },
+      ] },
+    }));
+    fs.writeFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), JSON.stringify([
+      { identifier: { id: "vscodevim.vim" }, relativeLocation: "vscodevim.vim-1.30.0" },
+    ]));
+
+    // the exclusion comes from the claim's own when clause — no extension is
+    // named anywhere in the mechanism
+    const [quit] = store.quitBindings();
+    assert.ok(quit.when.includes("!(editorTextFocus && vim.active)"), quit.when);
+    if (store.QUIT_CHORD === "ctrl+c") {
+      assert.ok(quit.when.includes("!(vim.mode == 'Insert')"), "every claim on the chord is carved out");
+    } else {
+      const [hint] = store.hintBindings();
+      assert.ok(hint.when.includes("!(vim.mode == 'Insert')"), hint.when);
+    }
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -633,6 +690,34 @@ test("quit-wins puts tode's entry after the imported one, so vscode picks tode's
     const quit = moved.filter((e) => e.command === "tode.confirmQuit" && e.key === "ctrl+shift+q");
     assert.equal(quit.length, 1);
     assert.ok(moved.some((e) => e.command === "workbench.action.imported"));
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("an import decision on any builtin writes its override, command staged on the decision", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-override-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const store = freshRequire("../dist/shortcuts/store.js");
+    store.saveDecisions({
+      version: 1,
+      terminal: "ghostty",
+      choices: {
+        "import:alt+w": { choice: "editor", key: "ctrl+alt+w", command: "workbench.action.closeEditorsInGroup" },
+        // a quit decision saved before commands rode on decisions still works
+        [store.IMPORT_DECISION_ID]: { choice: "editor", key: "ctrl+shift+q" },
+      },
+    });
+    assert.deepEqual(store.overrideBindings().sort((a, b) => a.key.localeCompare(b.key)), [
+      { key: "ctrl+alt+w", command: "workbench.action.closeEditorsInGroup", when: "!terminalFocus" },
+      { key: "ctrl+shift+q", command: "tode.confirmQuit", when: "!terminalFocus" },
+    ]);
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -696,8 +781,6 @@ function fakeRow() {
     id: "cmd+w",
     kind: "terminal",
     means: "close the current editor tab",
-    suggestion: "ctrl+shift+w",
-    recommend: "editor",
     terminal: {
       name: "Ghostty",
       short: "close the pane",
@@ -712,16 +795,13 @@ function fakeRow() {
 
 function fakeManagerDeps(overrides = {}) {
   const decided = [];
-  const acted = [];
   const confirmed = [];
   const { normalizeChord } = require("../dist/shortcuts/wizard.js");
   return {
     decided,
-    acted,
     confirmed,
     deps: {
-      steps: () => [{ kind: "conflict", row: fakeRow() }],
-      allRows: () => [fakeRow()],
+      rows: () => [fakeRow()],
       taken: (chord) =>
         chord === "ctrl+shift+t"
           ? { holder: "reopen a tab" }
@@ -730,10 +810,6 @@ function fakeManagerDeps(overrides = {}) {
             : null,
       normalize: normalizeChord,
       decide: (id, kind, decision) => decided.push({ id, kind, decision }),
-      act: (stepId, actionId) => {
-        acted.push({ stepId, actionId });
-        return { note: "acted " + actionId };
-      },
       confirm: () => {
         confirmed.push(true);
         return { note: "applied — reload ghostty" };
@@ -746,25 +822,39 @@ function fakeManagerDeps(overrides = {}) {
   };
 }
 
-test("the manager page embeds the steps, the terminal's colours and the logos", () => {
-  const { buildPage } = freshRequire("../dist/shortcuts/web.js");
-  const { deps } = fakeManagerDeps();
-  const page = buildPage(deps);
-  assert.match(page, /cmd\+w/);
-  assert.match(page, /close the current editor tab/);
-  assert.match(page, /--bg: #14161a/, "the page background is the terminal's");
-  assert.match(page, /--fg: #e8e6e3/);
-  assert.match(page, /data:image\/png;base64,/, "the real logo images ride along");
-});
-
-test("the manager server: page, taken checks, staging, acting, confirming, done", async () => {
+test("the manager serves the built page with the terminal's colours, and its state", async () => {
   const { startManager } = freshRequire("../dist/shortcuts/web.js");
-  const { decided, acted, confirmed, deps } = fakeManagerDeps();
+  const { deps } = fakeManagerDeps();
   const manager = await startManager(deps);
   const base = `http://127.0.0.1:${manager.port}`;
   try {
     const page = await (await fetch(base)).text();
-    assert.match(page, /tode shortcuts/);
+    assert.match(page, /terminal-browser shortcuts/);
+    assert.match(page, /--bg: #14161a/, "the page background is the terminal's");
+    assert.match(page, /--fg: #e8e6e3/);
+    assert.match(page, /\/assets\/index\.js/, "the built bundle is what the page loads");
+
+    const bundle = await fetch(`${base}/assets/index.js`);
+    assert.equal(bundle.status, 200);
+    assert.match(bundle.headers.get("content-type"), /text\/javascript/);
+
+    const state = await (await fetch(`${base}/state`)).json();
+    assert.equal(state.terminalName, "Ghostty");
+    assert.deepEqual(state.rows.map((row) => row.id), ["cmd+w"]);
+    assert.match(state.logos.editor ?? "", /^data:image\/png;base64,/, "the real logo images ride along");
+  } finally {
+    manager.close();
+  }
+});
+
+test("the manager server: page, taken checks, staging, confirming, done", async () => {
+  const { startManager } = freshRequire("../dist/shortcuts/web.js");
+  const { decided, confirmed, deps } = fakeManagerDeps();
+  const manager = await startManager(deps);
+  const base = `http://127.0.0.1:${manager.port}`;
+  try {
+    const page = await (await fetch(base)).text();
+    assert.match(page, /terminal-browser shortcuts/);
 
     const free = await (await fetch(`${base}/taken`, { method: "POST", body: JSON.stringify({ chord: "ctrl+alt+w", id: "cmd+w" }) })).json();
     assert.deepEqual(free, { ok: true, chord: "ctrl+alt+w" });
@@ -784,8 +874,7 @@ test("the manager server: page, taken checks, staging, acting, confirming, done"
 
     const staged = await (await fetch(`${base}/decide`, { method: "POST", body: JSON.stringify({ id: "cmd+w", kind: "terminal", decision: { choice: "terminal" } }) })).json();
     assert.equal(staged.ok, true);
-    assert.ok(Array.isArray(staged.steps), "a decision returns fresh steps");
-    assert.ok(Array.isArray(staged.table), "and the full table for the confirm screen");
+    assert.ok(Array.isArray(staged.rows), "a decision returns fresh rows");
     assert.equal(decided.length, 1);
     assert.equal(confirmed.length, 0, "deciding stages, it does not write");
 
@@ -796,11 +885,6 @@ test("the manager server: page, taken checks, staging, acting, confirming, done"
     const claimDecision = await (await fetch(`${base}/decide`, { method: "POST", body: JSON.stringify({ id: "ctrl+w", kind: "claim", decision: { choice: "terminal" } }) })).json();
     assert.equal(claimDecision.ok, true);
     assert.equal(decided[decided.length - 1].kind, "claim", "claim decisions carry their kind");
-
-    const action = await (await fetch(`${base}/act`, { method: "POST", body: JSON.stringify({ stepId: "group:text-editing", actionId: "free-all" }) })).json();
-    assert.equal(action.ok, true);
-    assert.equal(action.note, "acted free-all", "a step action's note reaches the page");
-    assert.equal(acted[0].stepId, "group:text-editing");
 
     const applied = await (await fetch(`${base}/confirm`, { method: "POST", body: "{}" })).json();
     assert.equal(applied.ok, true);
@@ -817,43 +901,46 @@ test("the manager server: page, taken checks, staging, acting, confirming, done"
   }
 });
 
-test("steps: groups gather their chords, actions stage for every member, vim step appears", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-steps-"));
+test("manager rows carry the derived editor side straight from the scan", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-rows-"));
   const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_DATA_HOME = path.join(home, "share");
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
-    const conflict = (editorId, short) => ({
-      editorId, trigger: "x", current: "y", inTerminal: short, short, freed: "freed", tradeoff: "t",
+    const conflict = (editorId, means, command, guard) => ({
+      editorId, trigger: "x", current: "y",
+      editor: { means, command, guard },
+      inTerminal: `runs stuff, so ${means} never reaches the editor`,
+      short: "stuff", freed: "stuff goes", tradeoff: "stuff stops working",
     });
     const provider = {
       id: "ghostty",
       name: "Ghostty",
       detect: () => true,
       ready: () => null,
-      scan: () => [conflict("cmd+w", "close the pane"), conflict("cmd+backspace", "erase"), conflict("cmd+left", "jump")],
+      scan: () => [
+        conflict("cmd+w", "close active editor", "workbench.action.closeActiveEditor", "editorFocus"),
+        conflict("cmd+f", "find", "actions.find"),
+      ],
       takenAs: () => null,
       apply: () => "",
       onApplied: () => false,
       undo: () => false,
       reloadHint: () => "reload ghostty",
     };
-    const choices = {};
-    const dismissed = new Set();
-    const steps = wizard.managerSteps(provider, choices, dismissed);
-    assert.equal(steps[0].kind, "conflict");
-    assert.equal(steps[0].row.id, "cmd+w");
-    const group = steps.find((step) => step.kind === "group");
-    assert.ok(group, "grouped chords share one screen");
-    assert.match(group.title, /text editing/);
-    assert.deepEqual(group.rows.map((row) => row.id), ["cmd+backspace", "cmd+left"]);
-    const vim = steps.find((step) => step.kind === "custom" && step.id === "vim");
-    assert.ok(vim, "no vim extension installed means the install step shows");
-
-    wizard.performStepAction(provider, choices, dismissed, "vim", "skip");
-    const after = wizard.managerSteps(provider, choices, dismissed);
-    assert.ok(!after.some((step) => step.kind === "custom" && step.id === "vim"), "skip dismisses the vim step");
+    const rows = wizard.managerRows(provider, { "cmd+f": { choice: "terminal" } });
+    assert.deepEqual(rows.map((row) => row.id), ["cmd+w", "cmd+f"]);
+    assert.equal(rows[0].means, "close active editor");
+    assert.deepEqual(
+      rows[0].detail,
+      { command: "workbench.action.closeActiveEditor", when: "editorFocus" },
+      "the metadata is structured, ready for label → value rows",
+    );
+    assert.deepEqual(rows[1].detail, { command: "actions.find", when: undefined });
+    assert.equal(rows[0].decision, null);
+    assert.deepEqual(rows[1].decision, { choice: "terminal" }, "staged decisions ride on their row");
+    assert.equal(rows[0].terminal.name, "Ghostty");
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;

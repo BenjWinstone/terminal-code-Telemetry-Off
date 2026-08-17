@@ -1,3 +1,8 @@
+/**
+ * need to look into how we can make the icon stop popping up
+ * 
+ * i think thats an electron thing
+ */
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -8,7 +13,7 @@ import { BROWSER_HOME, RUNTIME_DIR, VENDOR_DIR } from "./paths";
 /** The terminal-browser build tode is written against. tode drives flags whose
  * behaviour is specific to this build, so it pins rather than taking whatever
  * happens to be installed. */
-export const PINNED_VERSION = "app-mode-6b14c0b";
+export const PINNED_VERSION = "main-09123e5";
 
 const RELEASE_ORIGIN = process.env.TODE_RELEASE_ORIGIN ?? "https://terminal-browser.sh/install";
 

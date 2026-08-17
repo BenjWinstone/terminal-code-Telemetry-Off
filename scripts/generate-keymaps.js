@@ -15,8 +15,85 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const { CODE_SERVER_VERSION, codeServerRoot } = require(path.join(ROOT, "dist/codeserver/vendored.js"));
 const { freePort, answering } = require(path.join(ROOT, "dist/codeserver/server.js"));
-const { CdpSession, pageTarget, LINUX_USER_AGENT } = require(path.join(ROOT, "dist/cdp.js"));
 const { parseJsonc } = require(path.join(ROOT, "dist/jsonc.js"));
+
+/* Enough of the devtools protocol to set the page's user agent and send it
+   somewhere — this script is the only thing in the repo that drives a browser
+   this way, so the glue lives here rather than shipping in dist. */
+
+/** The workbench reads the user agent (and userAgentData) to pick its keymap;
+ * wearing this dumps the linux table from a mac. */
+const LINUX_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+
+async function pageTarget(port, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = "no page target";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+      if (!response.ok) throw new Error(`cdp list failed (${response.status})`);
+      const page = (await response.json()).find((t) => t.type === "page" && t.webSocketDebuggerUrl);
+      if (page) return page;
+    } catch (error) {
+      last = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  throw new Error(last);
+}
+
+class CdpSession {
+  constructor(socket) {
+    this.socket = socket;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.socket.addEventListener("message", (event) => {
+      let message;
+      try {
+        message = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      if (message.id === undefined) return;
+      const waiting = this.pending.get(message.id);
+      if (!waiting) return;
+      this.pending.delete(message.id);
+      if (message.error) waiting.reject(new Error(message.error.message));
+      else waiting.resolve(message.result);
+    });
+  }
+
+  static connect(url, timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const timer = setTimeout(() => {
+        socket.close();
+        reject(new Error("cdp connect timed out"));
+      }, timeoutMs);
+      socket.addEventListener("open", () => {
+        clearTimeout(timer);
+        resolve(new CdpSession(socket));
+      });
+      socket.addEventListener("error", () => {
+        clearTimeout(timer);
+        reject(new Error("cdp connect failed"));
+      });
+    });
+  }
+
+  send(method, params = {}) {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.socket.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  close() {
+    this.socket.close();
+  }
+}
 
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
