@@ -101,7 +101,7 @@ echo "binary $BIN_HOME/tode"
 case ":$PATH:" in
   *":$BIN_HOME:"*)
     echo
-    echo "run 'tode' in any folder to open it"
+    echo "run tode to get started"
     ;;
   *)
     echo
