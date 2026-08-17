@@ -338,7 +338,7 @@ export function App({ state }: { state: ManagerState }) {
   const TodeChip = () => (
     <span className="chip">
       {state.logos.editor ? <img src={state.logos.editor} alt="" /> : null}
-      <span>terminal-browser</span>
+      <span>terminal-code</span>
     </span>
   );
 
@@ -503,7 +503,7 @@ export function App({ state }: { state: ManagerState }) {
     const logo =
       side === "left" ? (row.kind === "terminal" ? state.logos.terminal : null) : state.logos.editor;
     const name =
-      side === "left" ? (row.kind === "terminal" ? row.terminal.name : row.claimant || "imported") : "terminal-browser";
+      side === "left" ? (row.kind === "terminal" ? row.terminal.name : row.claimant || "imported") : "terminal-code";
     // both sides describe themselves in the same table of labelled rows; the
     // editor side has more to say — the command id and the holding binding's
     // guard its description was generated from
@@ -612,7 +612,7 @@ export function App({ state }: { state: ManagerState }) {
       <main>
         <div className="intro">
           <div className="introlead">
-            terminal-browser and {state.terminalName} have <strong className="introcount">{rows.length}</strong>{" "}
+            terminal-code and {state.terminalName} have <strong className="introcount">{rows.length}</strong>{" "}
             conflicting shortcuts.
           </div>
           <div className="introrest">
@@ -660,7 +660,7 @@ export function App({ state }: { state: ManagerState }) {
         >
           <div className="f-head" />
           {head(state.logos.terminal, state.terminalName)}
-          {head(state.logos.editor, "terminal-browser")}
+          {head(state.logos.editor, "terminal-code")}
           {claimants.map((claimant) => head(null, claimant))}
           {rows.map((row) => (
             <Fragment key={row.id}>
@@ -737,7 +737,7 @@ export function App({ state }: { state: ManagerState }) {
                 </>
               ) : (
                 <button className="option primary" onClick={() => void post("/done", {})}>
-                  continue to terminal-browser
+                  continue to terminal-code
                 </button>
               )}
             </div>

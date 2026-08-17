@@ -65,7 +65,7 @@ export default function Home() {
               How does it work?
             </h2>
             <p className="mt-3 max-w-[560px] text-[13px] leading-[1.75] text-muted">
-             terminal-browser combines{" "}
+             terminal-code combines{" "}
               <a
                 href="https://github.com/coder/code-server"
                 target="_blank"
@@ -104,7 +104,7 @@ export default function Home() {
               href="https://github.com/zenbu-labs/tode"
               target="_blank"
               rel="noreferrer"
-              aria-label="terminal-browser on GitHub"
+              aria-label="terminal-code on GitHub"
               title="zenbu-labs/tode"
               className="flex items-center text-faint transition-colors hover:text-text2"
             >

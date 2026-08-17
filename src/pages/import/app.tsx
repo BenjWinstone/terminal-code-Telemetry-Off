@@ -81,7 +81,7 @@ export function App({ state }: { state: ImportState }) {
           </div>
           <div className="introactions">
             <button ref={primary} className="primary" onClick={() => post("/done")}>
-              continue to terminal-browser
+              continue to terminal-code
             </button>
           </div>
         </div>

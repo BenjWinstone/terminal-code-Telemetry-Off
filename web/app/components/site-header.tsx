@@ -10,13 +10,13 @@ export default function SiteHeader() {
           href="/"
           className="flex items-center text-[14px] tracking-tight text-text"
         >
-          terminal-browser
+          terminal-code
         </Link>
         <a
           href="https://github.com/zenbu-labs/tode"
           target="_blank"
           rel="noreferrer"
-          aria-label="terminal-browser on GitHub"
+          aria-label="terminal-code on GitHub"
           title="zenbu-labs/tode"
           className="flex items-center text-faint transition-colors hover:text-text"
         >

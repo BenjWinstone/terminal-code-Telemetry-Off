@@ -77,7 +77,7 @@ export default function Install() {
                 href="https://github.com/zenbu-labs/tode#windows"
                 target="_blank"
                 rel="noreferrer"
-                className="underline decoration-border underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok/50"
+                className="underline decoration-ok/60 underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok"
               >
                 here
               </a>
