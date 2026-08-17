@@ -948,3 +948,231 @@ test("manager rows carry the derived editor side straight from the scan", () => 
     for (const key of Object.keys(require.cache)) delete require.cache[key];
   }
 });
+
+test("kitty triggers translate both ways, or to nothing", () => {
+  const { toTrigger, fromTrigger } = require("../dist/shortcuts/kitty.js");
+  assert.equal(toTrigger("ctrl+shift+w"), "ctrl+shift+w");
+  assert.equal(toTrigger("cmd+pageup"), "super+page_up");
+  assert.equal(fromTrigger("ctrl+shift+c"), "ctrl+shift+c");
+  assert.equal(fromTrigger("super+page_down"), "cmd+pagedown", "kitty spellings normalise");
+  assert.equal(fromTrigger("opt+enter"), "alt+enter", "macOS mod aliases normalise");
+  assert.equal(fromTrigger("shift+ctrl+t"), "ctrl+shift+t", "mods canonicalise into editor order");
+  assert.equal(fromTrigger("ctrl+shift+plus"), null, "no editor spelling, no chord");
+  assert.equal(fromTrigger("ctrl+kp_add"), null, "keypad keys have no editor spelling");
+});
+
+test("kitty conflicts derive from the parser dump: binds on held chords, prefixes included", () => {
+  // pinned from kitty 0.45.0's own load_config() resolution, so a future kitty
+  // that changes its defaults shows up here rather than silently
+  const { allConflicts } = require("../dist/shortcuts/kitty.js");
+  const holds = (chord) =>
+    ({
+      "ctrl+shift+c": { command: "workbench.action.terminal.copySelection" },
+      "ctrl+shift+p": { command: "workbench.action.showCommands" },
+      "ctrl+shift+up": { command: "editor.action.insertCursorAbove" },
+    })[chord] ?? null;
+  const keymap = {
+    binds: [
+      { trigger: "ctrl+shift+c", action: "copy_to_clipboard", sequences: [] },
+      { trigger: "ctrl+shift+x", action: "close_window", sequences: [] },
+      {
+        trigger: "ctrl+shift+p",
+        action: null,
+        sequences: [{ keys: "ctrl+shift+p > y", action: "kitten hints --type hyperlink" }],
+      },
+      { trigger: "ctrl+shift+up", action: "scroll_line_up", sequences: [] },
+    ],
+    docs: { copy_to_clipboard: "Copy the selected text from the active window to the clipboard" },
+  };
+  const conflicts = allConflicts(keymap, new Set(), holds, () => null);
+  assert.deepEqual(
+    conflicts.map((c) => c.editorId),
+    ["ctrl+shift+c", "ctrl+shift+p"],
+    "held chords conflict; unheld close_window and pass-through scroll_line_up do not",
+  );
+  const copy = conflicts[0];
+  assert.equal(copy.current, "copy_to_clipboard");
+  assert.ok(
+    copy.inTerminal.includes("copy the selected text"),
+    "kitty's own action description rides along: " + copy.inTerminal,
+  );
+  assert.equal(copy.shared?.action, "copy_or_noop", "copy has a compatible rebind, so no duel");
+  assert.ok(copy.shared.note.includes("copy_or_noop"), "the acknowledgement names the config it writes");
+  const prefix = conflicts[1];
+  assert.equal(prefix.short, "1 key sequences");
+  assert.ok(prefix.current.startsWith("key sequence ("), "a prefix is freeable but marked unmovable");
+  assert.equal(prefix.shared, undefined, "a prefix has no compatible rebind");
+});
+
+test("kitty actions that pass through when they cannot act are not conflicts", () => {
+  const { allConflicts } = require("../dist/shortcuts/kitty.js");
+  const holds = () => ({ command: "editor.action.insertCursorAbove" });
+  const keymap = {
+    binds: [
+      { trigger: "ctrl+shift+up", action: "scroll_line_up", sequences: [] },
+      { trigger: "ctrl+shift+home", action: "scroll_home", sequences: [] },
+      { trigger: "ctrl+shift+g", action: "scroll_to_prompt -1", sequences: [] },
+      { trigger: "ctrl+shift+y", action: "copy_or_noop", sequences: [] },
+    ],
+    docs: {},
+  };
+  // the alternate screen (any fullscreen program, including the editor pane)
+  // makes kitty pass all of these through — verified against kitty 0.45
+  assert.deepEqual(allConflicts(keymap, new Set(), holds, () => null), []);
+});
+
+test("a shared free rebinds to the compatible action instead of unmapping", () => {
+  const { withSharedRebinds, keybindsFileContents } = require("../dist/shortcuts/kitty.js");
+  const moves = withSharedRebinds([
+    { trigger: "ctrl+shift+c", action: "copy_to_clipboard" },
+    { trigger: "ctrl+shift+t", action: "new_tab" },
+    { trigger: "ctrl+shift+v", action: "paste_from_clipboard", to: "ctrl+alt+v" },
+  ]);
+  assert.equal(moves[0].emit, "copy_or_noop", "copy frees into its compatible spelling");
+  assert.equal(moves[1].emit, undefined, "new_tab has none, so it stays a plain unmap");
+  assert.equal(moves[2].emit, undefined, "a user move keeps the plain unmap");
+  const contents = keybindsFileContents(moves);
+  assert.ok(contents.includes("\nmap ctrl+shift+c copy_or_noop\n"), "the rebind is the free");
+  assert.ok(contents.includes("\nmap ctrl+shift+t\n"), "others stay bare");
+});
+
+test("a compatible rebind counts as freed when the file is read back", () => {
+  const { writeFreed, freedTriggers, withSharedRebinds } = require("../dist/shortcuts/kitty.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-kitty-"));
+  try {
+    writeFreed(dir, withSharedRebinds([
+      { trigger: "ctrl+shift+c", action: "copy_to_clipboard" },
+      { trigger: "ctrl+shift+t", action: "new_tab", to: "ctrl+alt+t" },
+    ]));
+    assert.deepEqual(
+      [...freedTriggers(dir)].sort(),
+      ["ctrl+shift+c", "ctrl+shift+t"],
+      "the copy_or_noop rebind and the bare map are freed; the ctrl+alt+t rebind target is not",
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a chord tode already freed stays visible with its remembered action", () => {
+  const { allConflicts } = require("../dist/shortcuts/kitty.js");
+  const holds = () => ({ command: "workbench.action.terminal.copySelection" });
+  const past = (chord) => (chord === "ctrl+shift+c" ? "copy_to_clipboard" : null);
+  // the dump omits passthrough keys, so a freed trigger only exists in the file
+  const conflicts = allConflicts({ binds: [], docs: {} }, new Set(["ctrl+shift+c"]), holds, past);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].current, null, "null current marks it already freed");
+  assert.equal(conflicts[0].short, "copy to clipboard", "the decision that freed it still names it");
+});
+
+test("kitty frees write bare maps, refuse prefix rebinds, and undo cleanly", () => {
+  const { writeFreed, removeFreed, freedTriggers, withInclude, INCLUDE_LINE, keybindsFileContents } =
+    require("../dist/shortcuts/kitty.js");
+  const contents = keybindsFileContents([
+    { trigger: "ctrl+shift+c" },
+    { trigger: "ctrl+shift+t", to: "ctrl+alt+t", action: "new_tab" },
+    { trigger: "ctrl+shift+p", to: "ctrl+alt+p", action: "key sequence (ctrl+shift+p > y)" },
+  ]);
+  assert.ok(contents.includes("\nmap ctrl+shift+c\n"), "a bare map is the free");
+  assert.ok(contents.includes("\nmap ctrl+alt+t new_tab\n"), "a real action rebinds");
+  assert.ok(!contents.includes("ctrl+alt+p"), "a sequence marker never becomes config");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-kitty-"));
+  try {
+    const own = "font_size 13\nmap ctrl+shift+z toggle_layout stack\n";
+    fs.writeFileSync(path.join(dir, "kitty.conf"), own);
+    writeFreed(dir, [{ trigger: "ctrl+shift+c" }, { trigger: "ctrl+shift+z" }]);
+    const config = fs.readFileSync(path.join(dir, "kitty.conf"), "utf8");
+    assert.ok(config.startsWith(own), "the user's config keeps every byte");
+    assert.ok(config.trimEnd().endsWith(INCLUDE_LINE), "the include comes last, so the frees override");
+    assert.equal(withInclude(config), config, "the include line is added once");
+    assert.deepEqual([...freedTriggers(dir)].sort(), ["ctrl+shift+c", "ctrl+shift+z"]);
+
+    assert.equal(removeFreed(dir), true);
+    assert.equal(fs.readFileSync(path.join(dir, "kitty.conf"), "utf8"), own, "undo restores the config byte for byte");
+    assert.equal(freedTriggers(dir).size, 0);
+    assert.equal(removeFreed(dir), false, "a second undo has nothing to do");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the kitty reload walks the ancestry and sends SIGUSR1", () => {
+  const { reloadKitty } = require("../dist/shortcuts/kitty.js");
+  const tree = {
+    [process.pid]: { ppid: 500, command: "node" },
+    500: { ppid: 10, command: "/usr/bin/kitty" },
+    10: { ppid: 1, command: "systemd" },
+  };
+  const signalled = [];
+  const ok = reloadKitty((pid) => tree[pid] ?? null, (pid) => signalled.push(pid));
+  assert.equal(ok, true, "kitty found in the ancestry gets the reload signal");
+  assert.deepEqual(signalled, [500], "SIGUSR1 goes to the kitty process itself");
+
+  assert.equal(reloadKitty((pid) => ({ ppid: pid > 4 ? 2 : 1, command: "bash" }), () => {}), false);
+  assert.equal(
+    reloadKitty((pid) => tree[pid] ?? null, () => { throw new Error("gone"); }),
+    false,
+    "a signal that fails reports false, not a throw",
+  );
+});
+
+test("shared conflicts are settled silently at startup and never become wizard rows", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-shared-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    const store = require("../dist/shortcuts/store.js");
+    const conflict = (editorId, extra = {}) => ({
+      editorId, trigger: editorId, current: "copy_to_clipboard",
+      editor: { means: "copy selection", command: "workbench.action.terminal.copySelection" },
+      inTerminal: "", short: "copy", freed: "", tradeoff: "",
+      ...extra,
+    });
+    const applied = [];
+    const provider = {
+      id: "kitty", name: "kitty",
+      detect: () => true,
+      ready: () => null,
+      scan: () => [
+        conflict("ctrl+shift+c", { shared: { action: "copy_or_noop", note: "" } }),
+        conflict("ctrl+shift+t", { current: "new_tab" }),
+        // already freed (current null): nothing to re-apply
+        conflict("ctrl+shift+g", { current: null, shared: { action: "copy_or_noop", note: "" } }),
+      ],
+      takenAs: () => null,
+      apply: (moves) => { applied.push(moves); return ""; },
+      onApplied: () => true,
+      undo: () => false,
+      reloadHint: () => "reload kitty",
+    };
+
+    wizard.autoApplyShared(provider);
+    assert.equal(applied.length, 1, "one silent apply");
+    assert.deepEqual(
+      applied[0],
+      [{ trigger: "ctrl+shift+c", to: undefined, action: "copy_to_clipboard" }],
+      "only the fresh shared conflict is freed — never the real one, never the already-freed one",
+    );
+    assert.equal(
+      store.loadDecisions().choices["ctrl+shift+c"].choice,
+      "terminal",
+      "the silent apply is recorded like any decision",
+    );
+
+    // a second boot changes nothing: the decision is on record
+    wizard.autoApplyShared(provider);
+    assert.equal(applied.length, 1, "already-decided chords are left alone");
+
+    // the wizard never shows shared rows — they were settled, nothing to ask
+    const rows = wizard.managerRows(provider, {});
+    assert.deepEqual(rows.map((row) => row.id), ["ctrl+shift+t"]);
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});

@@ -44,11 +44,17 @@ export const DB_FILE = path.join(DATA_DIR, "tode.db");
 export const LOGS_DIR = path.join(STATE_DIR, "logs");
 
 /** The XDG homes tode hands to terminal-browser. Keeping them out of the user's
- * own means the two never share a daemon socket, a database or a log. */
+ * own means the two never share a database or a log.
+ *
+ * XDG_RUNTIME_DIR is deliberately absent: the Wayland compositor socket lives
+ * at $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY, so redirecting it leaves chromium
+ * unable to find the display and the daemon dies before binding its socket.
+ * Daemon isolation does not need it — terminal-browser namespaces its runtime
+ * dir by a hash of the install root, and on macOS (no XDG_RUNTIME_DIR) it
+ * falls back to the state home, which is redirected. */
 export const BROWSER_HOME = {
   data: path.join(DATA_DIR, "browser", "share"),
   state: path.join(STATE_DIR, "browser", "state"),
   cache: path.join(CACHE_DIR, "browser"),
-  runtime: path.join(STATE_DIR, "browser", "run"),
   appData: path.join(DATA_DIR, "browser", "chromium"),
 };

@@ -87,7 +87,7 @@ function managerState(deps: ManagerDeps) {
     terminalName: deps.terminalName,
     reloadHint: deps.reloadHint,
     intro: deps.intro === true,
-    logos: { terminal: logoDataUri("ghostty"), editor: logoDataUri("tode") },
+    logos: { terminal: logoDataUri(deps.terminalName.toLowerCase()), editor: logoDataUri("tode") },
   };
 }
 

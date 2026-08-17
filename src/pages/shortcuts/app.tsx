@@ -103,6 +103,23 @@ function collisions(row: Row, claims: Claims): Set<string> {
 
 const conflicted = (row: Row, claims: Claims) => collisions(row, claims).size > 0;
 
+/** The unshifted spelling of the punctuation row, by physical key code.
+ * Letters are deliberately absent: event.key already reports them unshifted,
+ * and going through the code would break non-QWERTY lettering. */
+const CODE_KEYS: Record<string, string> = {
+  Backquote: "`",
+  Minus: "-",
+  Equal: "=",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+};
+
 function chordFrom(event: KeyboardEvent): string | null {
   const mods: string[] = [];
   if (event.ctrlKey) mods.push("ctrl");
@@ -113,6 +130,13 @@ function chordFrom(event: KeyboardEvent): string | null {
   if (["control", "shift", "alt", "meta"].includes(key)) return null;
   if (key.startsWith("arrow")) key = key.slice(5);
   if (key === " ") key = "space";
+  // a shifted press reports the shifted character ("!" for shift+1), but
+  // chords are spelled with the base key ("shift+alt+1") — translate through
+  // the physical code for the digit and punctuation rows where that happens
+  if (key.length === 1) {
+    if (/^Digit\d$/.test(event.code)) key = event.code.slice("Digit".length);
+    else if (event.code in CODE_KEYS) key = CODE_KEYS[event.code];
+  }
   if (mods.length === 0) return null;
   return mods.concat(key).join("+");
 }

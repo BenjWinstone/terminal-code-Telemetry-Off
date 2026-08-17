@@ -1,4 +1,5 @@
 import { ghosttyProvider } from "./ghostty";
+import { kittyProvider } from "./kitty";
 
 /** One chord this terminal stands in front of. `current` is what the terminal
  * does with it right now, or null when tode already freed it — freed chords
@@ -26,6 +27,12 @@ export interface ProviderConflict {
   freed: string;
   /** What freeing the chord costs, in this terminal's terms. */
   tradeoff: string;
+  /** Set when the terminal offers a compatible rebind: an action that keeps
+   * the terminal's behaviour whenever it can perform it and passes the chord
+   * through otherwise. Freeing then costs nothing, so the wizard asks for an
+   * acknowledgement instead of a choice. `action` is what apply rebinds the
+   * trigger to; `note` explains the arrangement in a sentence or two. */
+  shared?: { action: string; note: string };
 }
 
 /** One freed chord: the trigger to unbind, and optionally the chord (editor
@@ -34,9 +41,12 @@ export interface FreedMove {
   trigger: string;
   to?: string;
   action?: string;
-  /** Frees by rebinding the trigger to emit these bytes instead of unbinding.
-   * On macOS a plain unbind hands some chords to the OS menu layer; a bound
-   * trigger stays ghostty's, and the bytes carry the chord to the terminal. */
+  /** Frees by rebinding the trigger instead of unbinding it. Ghostty uses
+   * this for byte sequences (on macOS a plain unbind hands some chords to the
+   * OS menu layer; a bound trigger stays ghostty's, and the bytes carry the
+   * chord to the terminal). Kitty uses it for compatible actions like
+   * copy_or_noop, which act when they can and pass the chord through when
+   * they cannot. */
   emit?: string;
 }
 
@@ -63,7 +73,7 @@ export interface ShortcutProvider {
   reloadHint(): string;
 }
 
-const PROVIDERS: ShortcutProvider[] = [ghosttyProvider];
+const PROVIDERS: ShortcutProvider[] = [ghosttyProvider, kittyProvider];
 
 export function providerFor(env: NodeJS.ProcessEnv = process.env): ShortcutProvider | null {
   return PROVIDERS.find((provider) => provider.detect(env)) ?? null;

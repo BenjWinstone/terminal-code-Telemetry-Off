@@ -14,7 +14,7 @@ import {
 } from "./codeserver/server";
 import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetch } from "./codeserver/vendored";
 import { installBridge, requestStartupView } from "./bridge";
-import { BOOT_AFTER_APPLY, firstRunShortcuts, shortcutsCommand } from "./shortcuts/wizard";
+import { BOOT_AFTER_APPLY, autoApplyShared, firstRunShortcuts, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
 import { firstRunImport } from "./import/firstrun";
 import { parseGoto, runningWindow, sendToWindow } from "./ipc";
@@ -273,6 +273,9 @@ async function openCommand(args: string[]): Promise<number> {
   // over first (imported keybindings feed the shortcut scan), then contested
   // chords get resolved while the cost of a wrong one is still zero
   await firstRunImport();
+  // every boot, not just the first: a terminal update can add new binds with
+  // a costless compatible rebind, and those are settled silently
+  autoApplyShared();
   await firstRunShortcuts();
   // after the wizard on purpose: the bridge bakes the quit hint and the
   // keybindings read the decisions, so both have to see what was just chosen
@@ -387,7 +390,6 @@ async function runtimeCommand(): Promise<number> {
     `terminal-browser ${runtime.version}  (${why})\n` +
       `  bin      ${runtime.bin}\n` +
       `  data     ${BROWSER_HOME.data}\n` +
-      `  runtime  ${BROWSER_HOME.runtime}\n` +
       `  chromium ${BROWSER_HOME.appData}\n`,
   );
   return 0;

@@ -45,13 +45,36 @@ function say(text: string, style: (line: string) => string = (line) => line): vo
   process.stdout.write(`${wrap(text, "  ").map(style).join("\n")}\n`);
 }
 
+/** Shared conflicts — the terminal keeps its action through a compatible
+ * rebind and passes the chord through otherwise — cost nothing, so they are
+ * applied silently at startup instead of asked about. A chord the user
+ * already decided anything about is left alone, and a failure leaves the
+ * config untouched for the hand-run wizard. */
+export function autoApplyShared(provider: ShortcutProvider | null = providerFor()): void {
+  if (!provider || provider.ready() !== null) return;
+  try {
+    const conflicts = provider.scan();
+    const choices = { ...(loadDecisions()?.choices ?? {}) };
+    const fresh = conflicts.filter(
+      (conflict) => conflict.shared && conflict.current !== null && !choices[conflict.editorId],
+    );
+    if (fresh.length === 0) return;
+    for (const conflict of fresh) {
+      choices[conflict.editorId] = { choice: "terminal", action: conflict.current ?? undefined };
+    }
+    applyDecisions(provider, conflicts, choices);
+    provider.onApplied();
+  } catch {}
+}
+
 /** The rows the manager page shows, freshly derived from disk so the page can
- * simply re-render whatever comes back after a change. */
+ * simply re-render whatever comes back after a change. Shared conflicts are
+ * not rows: they were settled silently at startup, with nothing to decide. */
 export function managerRows(
   provider: ShortcutProvider,
   choices: Record<string, Decision>,
 ): ManagerRow[] {
-  const rows = provider.scan().map((conflict): ManagerRow => ({
+  const rows = provider.scan().filter((conflict) => !conflict.shared).map((conflict): ManagerRow => ({
     id: conflict.editorId,
     kind: "terminal",
     means: conflict.editor.means,
@@ -239,7 +262,10 @@ export async function firstRunShortcuts(): Promise<void> {
   const provider = providerFor();
   if (!provider || provider.ready() !== null) return;
   try {
-    if (provider.scan().length === 0 && importedConflicts().length === 0) {
+    // the costless rebinds land silently first, so the wizard only ever
+    // shows chords with a real decision on them
+    autoApplyShared(provider);
+    if (provider.scan().filter((conflict) => !conflict.shared).length === 0 && importedConflicts().length === 0) {
       markIntroShown();
       return;
     }
@@ -281,7 +307,8 @@ export async function shortcutsCommand(args: string[]): Promise<number> {
     return 1;
   }
 
-  const conflicts = provider.scan();
+  autoApplyShared(provider);
+  const conflicts = provider.scan().filter((conflict) => !conflict.shared);
   const imported = importedConflicts();
   if (conflicts.length === 0 && imported.length === 0) {
     process.stdout.write(`${provider.name} already leaves every chord the editor needs alone\n`);

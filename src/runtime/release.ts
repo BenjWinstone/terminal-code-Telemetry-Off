@@ -110,7 +110,9 @@ function rootFor(version: string): string {
 
 /** Every child terminal-browser starts is launched through this script, including
  * the one a split pane opens, so pointing it at tode's own directories here is
- * what keeps the two installs from evicting each other's daemon. */
+ * what keeps a standalone terminal-browser install and tode's from sharing a
+ * database or a log. The daemon sockets never collide anyway — see the
+ * BROWSER_HOME comment for why XDG_RUNTIME_DIR must stay untouched. */
 function writeLauncher(root: string) {
   const bin = path.join(root, "bin", "terminal-browser");
   const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
@@ -130,7 +132,9 @@ export ELECTRON_RUN_AS_NODE=1
 ${scrollHelper}export XDG_DATA_HOME=\${TODE_BROWSER_DATA:-${quote(BROWSER_HOME.data)}}
 export XDG_STATE_HOME=\${TODE_BROWSER_STATE:-${quote(BROWSER_HOME.state)}}
 export XDG_CACHE_HOME=\${TODE_BROWSER_CACHE:-${quote(BROWSER_HOME.cache)}}
-export XDG_RUNTIME_DIR=\${TODE_BROWSER_RUN:-${quote(BROWSER_HOME.runtime)}}
+# XDG_RUNTIME_DIR keeps the session's own value: the Wayland socket lives there,
+# and the daemon socket is already namespaced by a hash of the install root.
+if [ -n "\${TODE_BROWSER_RUN:-}" ]; then export XDG_RUNTIME_DIR="\$TODE_BROWSER_RUN"; fi
 export TERMINAL_BROWSER_APPDATA=\${TODE_BROWSER_APPDATA:-${quote(BROWSER_HOME.appData)}}
 exec "$ROOT/${electron}" "$ROOT/cli/dist/main.js" "$@"
 `,
