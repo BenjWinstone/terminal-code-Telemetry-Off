@@ -17,7 +17,7 @@ import { installBridge, requestStartupView } from "./bridge";
 import { BOOT_AFTER_APPLY, autoApplyShared, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
 import { runOnboarding } from "./onboarding";
-import { parseGoto, runningWindow, sendToWindow } from "./ipc";
+import { parseGoto, runningWindow, sendToExtension } from "./ipc";
 import type { OpenFile } from "./ipc";
 import { EXTENSIONS_DIR, VSCODE_DIR, registerThemeExtension } from "./profile";
 import {
@@ -34,29 +34,25 @@ import {
 import { Pane, launchBrowser } from "./launch";
 import { PINNED_VERSION, resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
 import { BROWSER_HOME } from "./runtime/paths";
+import { skillCommand } from "./skill";
 import { resolveTarget, workbenchUrl } from "./target";
 import { uninstallCommand } from "./uninstall";
 import { upgrade } from "./upgrade";
 import { hex } from "./theme/color";
 import { generateTheme, semanticColors } from "./theme/generate";
 
-/** Where the installer put the shim — the same computation install.sh makes. */
+// hm? does it ever get installed at home dir local?
 function shimPath(): string {
   const binHome = process.env.XDG_BIN_HOME ?? path.join(os.homedir(), ".local", "bin");
   return path.join(binHome, "tode");
 }
 
-/** What the bridge extension should run to reach tode again. The shim is
- * preferred because it rebuilds a stale dev tree before running. */
 function todeCommand(): string[] {
   const shim = shimPath();
   if (fs.existsSync(shim)) return [shim];
   return [process.execPath, process.argv[1]];
 }
 
-/** The editor url for a boot that starts outside openCommand: the standalone
- * wizard's apply navigates its own pane here, instead of closing it and
- * respawning — which would flash the terminal through its primary buffer. */
 async function bootEditorUrl(): Promise<string> {
   const { palette } = await readPalette();
   ensureFont();
@@ -86,7 +82,7 @@ function takeFlag(args: string[], name: string): string | undefined {
 
 function takeAll(args: string[], ...names: string[]): string[] {
   const found: string[] = [];
-  for (let at = 0; at < args.length; ) {
+  for (let at = 0; at < args.length;) {
     if (!names.includes(args[at])) {
       at += 1;
       continue;
@@ -155,6 +151,8 @@ Commands:
   runtime               Which terminal-browser build is in use, and why
   provision             Fetch the pinned code-server build if it is missing
   daemon status|stop    The code-server that stays warm between opens
+  skill                 This install as a SKILL.md, for coding agents: every
+                        path resolved, live state, what is safe to edit
   upgrade [--check]     Install the newest build on this channel
   shutdown              Stop everything tode is running
   uninstall [--yes]     Remove terminal-code entirely: the app, its profile and data,
@@ -163,7 +161,7 @@ Commands:
 
 
 /**
- * er?
+ * i dont think this stuff is necessary come back to this
  */
 const IGNORED: string[] = [
   "--verbose",
@@ -176,9 +174,6 @@ const IGNORED: string[] = [
   "--disable-workspace-trust",
 ];
 
-/**
- * er?
- */
 const IGNORED_WITH_VALUE: string[] = [
   "--log",
   "--locale",
@@ -188,9 +183,6 @@ const IGNORED_WITH_VALUE: string[] = [
   "--extensions-dir",
 ];
 
-/**
- * look into this again, i dont think i agree with our behavior here
- */
 const UNSUPPORTED: [string, string][] = [
   ["--disable-extensions", "extensions are per code-server, not per window"],
   ["--disable-extension", "extensions are per code-server, not per window"],
@@ -207,9 +199,6 @@ function dropIgnored(args: string[]): void {
 
 async function openCommand(args: string[]): Promise<number> {
   dropIgnored(args);
-  // -a, -g and -d are modifiers on the paths, exactly the way the code cli
-  // defines them (add/goto/diff are booleans there): the paths stay
-  // positional, so flags and paths can come in any order
   const adding = takeBool(args, "-a") || takeBool(args, "--add");
   const going = takeBool(args, "-g") || takeBool(args, "--goto");
   const diffing = takeBool(args, "-d") || takeBool(args, "--diff");
@@ -219,6 +208,7 @@ async function openCommand(args: string[]): Promise<number> {
   if (takeBool(args, "--list-extensions")) {
     return listExtensions(takeBool(args, "--show-versions"));
   }
+
   const newWindow = takeBool(args, "-n") || takeBool(args, "--new-window");
   const reuse = takeBool(args, "-r") || takeBool(args, "--reuse-window");
   const wait = takeBool(args, "-w") || takeBool(args, "--wait");
@@ -245,9 +235,6 @@ async function openCommand(args: string[]): Promise<number> {
     .map((t) => t.folder!)
     .filter((folder, at, all) => all.indexOf(folder) === at);
 
-  // Run from a tode terminal, tode behaves like tode: a folder opens its own
-  // pane. Opening it here would reload the window and take the terminal you
-  // typed in with it, so that only happens when asked for by name.
   const here = adding || reuse;
   const window = newWindow ? null : runningWindow();
   const sendFolders = here ? folders : [];
@@ -258,7 +245,7 @@ async function openCommand(args: string[]): Promise<number> {
     !opensAPane &&
     (files.length > 0 || sendFolders.length > 0 || pair.length > 0 || review)
   ) {
-    await sendToWindow(
+    await sendToExtension(
       window,
       {
         files,
@@ -280,7 +267,6 @@ async function openCommand(args: string[]): Promise<number> {
   const target = wanted[0] ?? resolveTarget(undefined, process.cwd());
   const runtime = await resolveRuntimeWithProgress();
   done("runtime");
-  // the terminal is asked for its colours here, while tode still owns the tty
   const { palette } = await readPalette();
   ensureFont();
   installTheme(palette);
@@ -288,34 +274,19 @@ async function openCommand(args: string[]): Promise<number> {
   installSettings();
   setLiveTheme(generateTheme(palette));
   done("profile");
-  // once, before the first editor ever shows: the other editor's setup comes
-  // over first (imported keybindings feed the shortcut scan), then contested
-  // chords get resolved while the cost of a wrong one is still zero
-  // every boot, not just the first: a terminal update can add new binds with
-  // a costless compatible rebind, and those are settled silently
   autoApplyShared();
 
-  // finalized once, by whichever screen reaches the editor first. The bridge
-  // and keybindings land after the wizard on purpose: the bridge bakes the
-  // quit hint and the keybindings read the decisions, so both have to see
-  // what was just chosen.
   let finalized: Promise<string> | null = null;
   const finalize = () =>
-    (finalized ??= (async () => {
-      installBridge(todeCommand());
-      installKeybindings();
-      const server = await ensureServer();
-      done("code-server");
-      // stamped last: the bridge discards markers older than two minutes, and
-      // on a fresh install the wizard and the code-server download can spend
-      // all of that
-      if (review) requestStartupView("scm");
-      return workbenchUrl(origin(server), target);
-    })());
+  (finalized ??= (async () => {
+    installBridge(todeCommand());
+    installKeybindings();
+    const server = await ensureServer();
+    done("code-server");
+    if (review) requestStartupView("scm");
+    return workbenchUrl(origin(server), target);
+  })());
 
-  // the first-run screens share one pane with the editor: each screen
-  // navigates to the next, and the last navigation is the workbench itself —
-  // the terminal never drops back to its primary buffer between them
   const pane = new Pane(runtime, { split, size, stages });
   await runOnboarding(pane, finalize);
   if (pane.owned()) return pane.exited();
@@ -329,8 +300,6 @@ async function openCommand(args: string[]): Promise<number> {
   );
 }
 
-/** Extensions go into tode's own profile, not whichever code-server the machine
- * happens to have configured. */
 function extensionCommand(args: string[], quiet = false): number {
   const result = spawnSync(
     codeServerBin(),
@@ -344,11 +313,6 @@ function listExtensions(withVersions: boolean): number {
   return extensionCommand(withVersions ? ["--list-extensions", "--show-versions"] : ["--list-extensions"], true);
 }
 
-/**
- * i wonder if we correctly handle installing from open vsx
- * 
- * wait no we shouldn't have to do that
- */
 function manageExtensions(install: string[], remove: string[]): number {
   for (const id of remove) {
     const code = extensionCommand(["--uninstall-extension", id]);
@@ -380,8 +344,7 @@ async function themeCommand(file?: string): Promise<number> {
     return 0;
   }
   const { palette, source } = await readPalette();
-  // what?
-  // once again i hate this
+  // slop copy fixme
   const where = {
     terminal: "read from this terminal",
     cache: "from the cache, this terminal did not answer",
@@ -396,9 +359,6 @@ async function themeCommand(file?: string): Promise<number> {
   for (const [name, color] of Object.entries(accent)) process.stdout.write(line(name, hex(color)));
   const { changed, fingerprint } = installTheme(palette);
   setLiveTheme(generateTheme(palette));
-  /**
-   * its weird, this is main.ts but im fairly certain this is not the mian script ran by electron
-   */
   installBridge(todeCommand());
   installCss(palette);
   installSettings();
@@ -420,9 +380,10 @@ async function runtimeCommand(): Promise<number> {
   }[runtime.source];
   process.stdout.write(
     `terminal-browser ${runtime.version}  (${why})\n` +
-      `  bin      ${runtime.bin}\n` +
-      `  data     ${BROWSER_HOME.data}\n` +
-      `  chromium ${BROWSER_HOME.appData}\n`,
+    `  bin      ${runtime.bin}\n` +
+    `  data     ${BROWSER_HOME.data}\n` +
+    // chromium wat
+    `  chromium ${BROWSER_HOME.appData}\n`,
   );
   return 0;
 }
@@ -471,8 +432,6 @@ const STAGES: [string, string][] = [
   ["settled", "code/LifecyclePhase/Eventually"],
 ];
 
-/** The page reports its own marks through the injector, so this is what the
- * workbench measured rather than what polling from outside could see. */
 function timingCommand(): number {
   let page: PageTiming;
   try {
@@ -484,7 +443,7 @@ function timingCommand(): number {
   let launch: { spawnedAt: number; stages: [string, number][] } | null = null;
   try {
     launch = JSON.parse(fs.readFileSync(`${CSS_FILE}.launch.json`, "utf8"));
-  } catch {}
+  } catch { }
   const bar = (ms: number, of: number) => "\u2588".repeat(Math.max(1, Math.round((ms / of) * 34)));
   const total = Math.max(page.marks["code/didStartWorkbench"] ?? 0, page.loadEnd, 1);
   const seconds = Math.round((Date.now() - page.at) / 1000);
@@ -493,8 +452,8 @@ function timingCommand(): number {
   const rows: [string, number][] = [
     ...(launch
       ? ([
-          ...launch.stages.map(([label, ms]) => [`tode: ${label}`, ms - launch!.stages[launch!.stages.length - 1][1]] as [string, number]),
-        ] as [string, number][])
+        ...launch.stages.map(([label, ms]) => [`tode: ${label}`, ms - launch!.stages[launch!.stages.length - 1][1]] as [string, number]),
+      ] as [string, number][])
       : []),
     ...(beforeNavigation !== null && beforeNavigation >= 0
       ? ([["browser start to navigation", beforeNavigation]] as [string, number][])
@@ -590,8 +549,6 @@ async function main(): Promise<number> {
   }
   if (args[0] === "shortcut-setup") {
     const rest = args.slice(1);
-    // a script running the wizard would block on the editor booting over the
-    // script's own cwd — --no-boot lets it apply and return
     const noBoot = takeBool(rest, "--no-boot");
     const code = await shortcutsCommand(rest, noBoot ? undefined : bootEditorUrl);
     if (code === BOOT_AFTER_APPLY) return noBoot ? 0 : openCommand([]);
@@ -599,10 +556,15 @@ async function main(): Promise<number> {
   }
   if (args[0] === "import") return importCommand(args.slice(1));
   if (args[0] === "theme") return themeCommand(args[1]);
+  // just not needed, delete me
   if (args[0] === "runtime") return runtimeCommand();
+  // no u should be removed
   if (args[0] === "provision") return provisionCommand();
+  // hm, should this exist tho?
   if (args[0] === "daemon") return daemonCommand(args[1]);
   if (args[0] === "timing") return timingCommand();
+  if (args[0] === "skill") return skillCommand();
+  // i dont know if i want this quit command, especially since theres a shutdown and that should be equivelent?
   if (args[0] === "quit") return quitCommand();
   if (args[0] === "upgrade") return upgradeCommand(args.slice(1));
   if (args[0] === "shutdown") return shutdownCommand();

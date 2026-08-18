@@ -19,11 +19,6 @@ function markShown(): void {
   } catch {}
 }
 
-/** The very first open offers to bring another editor's setup over, before
- * the shortcut wizard runs — imported keybindings are part of what that
- * wizard scans. Shown once; tode import does the same thing any time. The
- * stage is a page server only: the onboarding pane shows it, and `next` is
- * where the page navigates itself when it is done. */
 export async function importFirstRunStage(
   next: () => Promise<string>,
 ): Promise<OnboardStage | null> {

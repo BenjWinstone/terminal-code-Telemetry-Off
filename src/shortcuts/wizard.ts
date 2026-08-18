@@ -11,7 +11,7 @@ import { providerFor, providerNames } from "./provider";
 import type { ProviderConflict, ShortcutProvider } from "./provider";
 import { QUIT_CHORD, clearDecisions, loadDecisions, saveDecisions } from "./store";
 import type { Decision } from "./store";
-import { makeEditorHolds } from "./ghostty";
+import { makeEditorHolds } from "./holds";
 import { defaultBinding } from "./vscode-keymap";
 import { startManager } from "./web";
 import type { ManagerDeps, ManagerRow } from "./web";
@@ -26,7 +26,6 @@ export function normalizeChord(input: string): string | null {
   const parts = input.toLowerCase().split("+").map((part) => part.trim()).filter(Boolean);
   if (parts.length < 2) return null;
   const key = parts.pop()!;
-  // every spelling a person might type by hand means its canonical modifier
   const ALIASES: Record<string, string> = {
     meta: "cmd",
     super: "cmd",
@@ -47,8 +46,6 @@ function applyDecisions(provider: ShortcutProvider, conflicts: ProviderConflict[
       const decision = choices[conflict.editorId];
       return { trigger: conflict.trigger, to: decision.key, action: decision.action };
     });
-  // claims the terminal itself held — chords the user typed into, never rows
-  // of the scan — free or move through the same file the rows do
   for (const [id, decision] of Object.entries(choices)) {
     if (!id.startsWith("claim:") || decision.owner !== "terminal") continue;
     if (decision.choice !== "terminal" || !decision.action) continue;
@@ -66,11 +63,6 @@ function say(text: string, style: (line: string) => string = (line) => line): vo
   process.stdout.write(`${wrap(text, "  ").map(style).join("\n")}\n`);
 }
 
-/** Shared conflicts — the terminal keeps its action through a compatible
- * rebind and passes the chord through otherwise — cost nothing, so they are
- * applied silently at startup instead of asked about. A chord the user
- * already decided anything about is left alone, and a failure leaves the
- * config untouched for the hand-run wizard. */
 export function autoApplyShared(provider: ShortcutProvider | null = providerFor()): void {
   if (!provider || provider.ready() !== null) return;
   try {
@@ -85,7 +77,7 @@ export function autoApplyShared(provider: ShortcutProvider | null = providerFor(
     }
     applyDecisions(provider, conflicts, choices);
     provider.onApplied();
-  } catch {}
+  } catch { }
 }
 
 /** Whoever holds a chord on the editor side, as a claimant the page can seat
@@ -130,23 +122,10 @@ function claimHolder(
   return null;
 }
 
-/** The rows the manager page shows, freshly derived from disk so the page can
- * simply re-render whatever comes back after a change. Shared conflicts are
- * not rows: they were settled silently at startup, with nothing to decide. */
 type RowClaim = NonNullable<ManagerRow["claims"]>[number];
 
-/** A mover's self-exemption. Only a holder on the SAME side as the mover,
- * denoting the same binding identity, may be exempted: a terminal mover may
- * skip another trigger of its own action (`action`), an editor mover may skip
- * a duplicate spelling of its own command (`command`). Cross-side holders
- * always join the duel — the conflict scan's row predicate is a cross-side
- * conjunction, so exempting an opposite-side holder here manufactures an
- * unresolved row on the very next scan. */
 type SelfExempt = { action?: string; command?: string };
 
-/** Who really holds a chord right now: the terminal's binding plus every
- * editor-side holder THE SCAN would count — the exact same derivation
- * (makeEditorHolds), so vetting and rescan can never disagree on holders. */
 function liveHolders(
   provider: ShortcutProvider,
   holds: ReturnType<typeof makeEditorHolds>,
@@ -210,12 +189,7 @@ export function managerRows(
   provider: ShortcutProvider,
   choices: Record<string, Decision>,
 ): ManagerRow[] {
-  // one holds pass for the whole derivation — the same files, read once
   const holds = makeEditorHolds();
-  // Every claimant column a row's duel needs, derived from disk plus the
-  // staged decisions, so any step re-rendered after any decision shows the
-  // world as the session has actually arranged it. Chains follow moves:
-  // a claim moved onto a held chord seats that holder too, as far as it goes.
   const rowClaims = (
     rowChord: string,
     own: { action?: string; command?: string },
@@ -229,11 +203,6 @@ export function managerRows(
       if (seen.has(identity)) return;
       seen.add(identity);
       out.push(claim);
-      // when this claim moved on, its landing spot's holders join too. The
-      // only exemption at the target is the mover's OWN identity on its OWN
-      // side — a terminal-owner claim skips another trigger of its action,
-      // an editor claim skips a duplicate spelling of its command; every
-      // cross-side holder joins, because the scan will count it
       follow(
         claim.decided,
         claim.decided?.owner === "terminal"
@@ -258,10 +227,6 @@ export function managerRows(
   const currents = new Map<string, string>();
   const rows = provider.scan().filter((conflict) => !conflict.shared).map((conflict): ManagerRow => {
     if (conflict.current) currents.set(conflict.editorId, conflict.current);
-    // the row's own binding may already be decided from another step's duel
-    // (a claim column naming this very trigger and action) — one binding is
-    // one fact, so the step shows it resolved rather than asking again. A
-    // legacy keyless record counts when its action names this very binding.
     const legacy = choices[`claim:${conflict.editorId}`];
     const mirrored =
       choices[`claim:${conflict.editorId}:${conflict.current}`] ??
@@ -280,16 +245,9 @@ export function managerRows(
         does: conflict.inTerminal,
         freed: conflict.freed,
         tradeoff: conflict.tradeoff,
-        // every scanned conflict is bound sans tode; the staged decision is
-        // what frees it, and the page derives the display from that
         bound: true,
       },
       decision,
-      // every other binding on the chord joins the duel as its own column, so
-      // losing the chord shows everything it loses; holders of a decided-on
-      // target chord join too, contested, chained as far as moves went
-      // the root mover's side comes from the decision itself: a terminal
-      // move carries the row's action, an editor move the moved command
       claims: rowClaims(
         conflict.editorId,
         { action: conflict.current ?? undefined, command: conflict.editor.command },
@@ -373,20 +331,9 @@ export function managerRows(
   });
 }
 
-/** The interactive manager is a web page in this very pane: terminal-browser
- * renders it, the page talks to a local server, and decisions stage in
- * memory until the confirm screen writes them — q discards. */
-/** Sentinel exit: the user applied, so the caller should boot tode. */
+// racy i dont like this
 export const BOOT_AFTER_APPLY = 100;
 
-/** The manager's page server and the mutable outcome its confirm writes into.
- * Standalone runs spawn a browser around it; onboarding hands its url to the
- * pane that is already open. */
-/** What already holds a candidate chord, or null when it is free. `rowId` is
- * the row asking: another spelling of that row's own binding is not a
- * conflict with itself — ghostty may bind both super+1 and alt+1 to
- * goto_tab:1, and moving one trigger onto the other must not duel the action
- * against itself. */
 export function chordTaken(
   provider: ShortcutProvider,
   staged: Record<string, Decision>,
@@ -396,12 +343,6 @@ export function chordTaken(
   side?: "terminal" | "editor",
 ): ReturnType<ManagerDeps["taken"]> {
   const conflict = provider.scan().find((entry) => entry.editorId === rowId);
-  // whatever ANY step already moved onto the chord parks it — a row's side,
-  // an imported binding, a claim — so two steps can never silently book the
-  // same chord. Only the asker's own records are exempt (re-picking your own
-  // target is a no-op, not a collision): a claim names its exact record; a
-  // row its own two, plus the claim record about its very own binding — the
-  // same fact under another key — but never other bindings' records.
   const ownKeys = command
     ? [`claim:${rowId}:${command}`, `claim:${rowId}`]
     : [rowId, `import:${rowId}`, `claim:${rowId}:${conflict?.current}`];
@@ -411,10 +352,6 @@ export function chordTaken(
     const what = decision.action ?? decision.command ?? "another shortcut";
     return { holder: `${what} (moved here this session)` };
   }
-  // the mover's self-exemption, per the side asking. A claim names its
-  // command (terminal-owner when the terminal binds its chord to it); a row
-  // side names its action or its editor command; an ask with no side gets no
-  // exemptions — refusing a self-duel is safe, silently allowing one is not
   const own: SelfExempt = command
     ? provider.takenAs(rowId ?? "") === command
       ? { action: command }
@@ -423,20 +360,13 @@ export function chordTaken(
       ? { action: conflict?.current ?? undefined }
       : side === "editor"
         ? {
-            // import rows are not in the scan; their editor side is the
-            // builtin bound on the row's own chord
-            command:
-              conflict?.editor.command ??
-              builtinKeybindings().find(
-                (bind) => !!bind.key && !!bind.command && normalizeChord(bind.key) === rowId,
-              )?.command,
-          }
+          command:
+            conflict?.editor.command ??
+            builtinKeybindings().find(
+              (bind) => !!bind.key && !!bind.command && normalizeChord(bind.key) === rowId,
+            )?.command,
+        }
         : {};
-  // never just a warning: whoever still holds the chord — the terminal, an
-  // imported keybinding, a builtin, an extension — joins the duel as one
-  // more column, so the collision is visible and resolvable in place. A
-  // holder some staged decision already moved or unset no longer counts:
-  // the chord is effectively free.
   for (const holder of liveHolders(provider, makeEditorHolds(), chord, own)) {
     const decided = stagedAbout(staged, chord, holder);
     if (decided?.choice === "terminal") continue;
@@ -447,9 +377,6 @@ export function chordTaken(
   return null;
 }
 
-/** The wizard's staging semantics as one testable unit: the exact rows,
- * vetting, decision stapling and apply the page server drives — everything
- * but HTTP. The closed-loop invariant test lives on this seam. */
 export function managerSession(provider: ShortcutProvider): {
   staged: Record<string, Decision>;
   rows(): ManagerRow[];
@@ -470,9 +397,6 @@ export function managerSession(provider: ShortcutProvider): {
         : kind === "import"
           ? `import:${id}`
           : id;
-      // one binding is one fact: a terminal row and a claim column can both
-      // name the same trigger and action, so whichever door the user edits
-      // through, the record staged behind the other door goes
       const dropTwin = () => {
         if (kind === "terminal") {
           const current = provider.scan().find((entry) => entry.editorId === id)?.current;
@@ -497,8 +421,6 @@ export function managerSession(provider: ShortcutProvider): {
       }
       dropTwin();
       if (kind === "import" && decision.choice === "editor") {
-        // the builtin command the moved chord should carry rides on the
-        // decision, the same way a terminal row's editor move stages its own
         decision.command =
           builtinKeybindings().find((bind) => !!bind.key && normalizeChord(bind.key) === id)
             ?.command ?? staged[key]?.command;
@@ -506,21 +428,13 @@ export function managerSession(provider: ShortcutProvider): {
       if (kind === "terminal") {
         const conflict = provider.scan().find((entry) => entry.editorId === id);
         if (decision.choice === "terminal") {
-          // a move needs the action the trigger runs today; keep whatever a
-          // previous decision already learned when the scan no longer knows
           decision.action = conflict?.current ?? staged[key]?.action;
         }
         if (decision.choice === "editor") {
-          // the command the editor side should carry rides on the decision
-          // itself, staged from the conflict when the choice is made
           decision.command = conflict?.editor.command ?? staged[key]?.command;
         }
       }
       if (claim) {
-        // the removal entry needs the command, a remap also needs its guard.
-        // The page names the claim it means when it can; the fallback
-        // resolves in the same order taken() seats claimants, so the column
-        // shown and the decision staged always name the same holder
         const terminal = provider.takenAs(id);
         const named = info?.command;
         if (named && terminal === named) {
@@ -530,8 +444,6 @@ export function managerSession(provider: ShortcutProvider): {
           decision.action = named;
           decision.guard = info?.when;
         } else if (terminal) {
-          // the terminal holds the chord: its unset or move rides the
-          // provider's freed file at apply time, not keybindings.json
           decision.action = terminal;
           decision.owner = "terminal";
         } else {
@@ -557,17 +469,13 @@ async function openManager(
   const { palette } = await readPalette();
   const session = managerSession(provider);
   const state = { confirmed: false, reloadedLive: false, navigated: false };
-  // whether done actually led somewhere decides who owns the pane afterwards
   const wrappedNext = next
     ? async () => {
-        const url = await next();
-        state.navigated = !!url;
-        return url;
-      }
+      const url = await next();
+      state.navigated = !!url;
+      return url;
+    }
     : undefined;
-  // every row is a step, decided or not: earlier decisions stay visible and
-  // editable, and the page resumes at the first undecided one — so "do later"
-  // after a few steps comes back exactly where the user left off
   const manager = await startManager({
     rows: session.rows,
     taken: session.taken,
@@ -594,8 +502,6 @@ async function runManager(
   intro = false,
   bootUrl?: () => Promise<string>,
 ): Promise<{ code: number; confirmed: boolean; reloadedLive: boolean; served: boolean; navigated: boolean }> {
-  // applying leads into the editor by navigating this very pane; a plain
-  // close stays a close (next resolves null), so quit still just quits
   const next = bootUrl ? async () => (state0().confirmed ? await bootUrl() : null) : undefined;
   const opened = await openManager(provider, intro, next, false);
   const { manager, state } = opened;
@@ -603,20 +509,16 @@ async function runManager(
     return opened.state;
   }
   const runtime = await resolveRuntimeWithProgress();
-  const flags = supportedFlags(runtime);
   const child = spawn(
     runtime.bin,
     [
       "open",
       `http://127.0.0.1:${manager.port}`,
-      flags.has("--app-mode") ? "--app-mode" : "--chromeless",
-      // the page has its own keys; the browser's must not sit in front of them
-      ...(flags.has("--no-shortcuts") ? ["--no-shortcuts"] : []),
+      "--app-mode"
     ],
     { stdio: "inherit" },
   );
   void manager.done.then(() => {
-    // when done navigated, this child is the editor now — it stays
     if (!state.navigated) child.kill("SIGTERM");
   });
   const code = await new Promise<number>((resolve) => {
@@ -644,21 +546,13 @@ async function runManager(
 
 const INTRO_MARKER = path.join(DATA_DIR, "shortcuts-intro");
 
-/** Written whenever the manager has been on screen — the first open must not
- * repeat a wizard the user just walked, whichever door they came in by. */
 function markIntroShown(): void {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(INTRO_MARKER, `${new Date().toISOString()}\n`);
-  } catch {}
+  } catch { }
 }
 
-/** The first open shows the conflicts before the editor: a chord that
- * silently does the wrong thing on day one costs more trust than one setup
- * screen. Shown once — the marker also lands when there was nothing to show,
- * and tode shortcut-setup reruns the manager any time. The stage is a page server
- * only: the onboarding pane shows it, and `next` is where the page navigates
- * itself when it is done. */
 export async function shortcutsFirstRunStage(
   next: () => Promise<string>,
 ): Promise<import("../onboarding").OnboardStage | null> {
@@ -667,8 +561,6 @@ export async function shortcutsFirstRunStage(
   const provider = providerFor();
   if (!provider || provider.ready() !== null) return null;
   try {
-    // the costless rebinds land silently first, so the wizard only ever
-    // shows chords with a real decision on them
     autoApplyShared(provider);
     if (provider.scan().filter((conflict) => !conflict.shared).length === 0 && importedConflicts().length === 0) {
       markIntroShown();
@@ -683,9 +575,6 @@ export async function shortcutsFirstRunStage(
     done: manager.done,
     served: manager.served,
     close: manager.close,
-    // a wizard that never made it onto the screen was not shown: the marker
-    // only lands when it was, so the next open tries again rather than
-    // skipping forever
     shown: markIntroShown,
   };
 }
@@ -697,11 +586,12 @@ export async function shortcutsCommand(
   const provider = providerFor();
   if (!provider) {
     process.stdout.write(
-      `the shortcut wizard knows ${providerNames().join(", ")} — this terminal is something else\n`,
-    );
+      `shortcut setup not yet available in this terminal, please file an issue if you want your terminal supported https://github.com/zenbu-labs/tode/issues`
+    )
     return 0;
   }
 
+  // what is undo?
   if (args.includes("--undo")) {
     const hadDecisions = loadDecisions() !== null;
     const undone = provider.undo();
@@ -726,27 +616,21 @@ export async function shortcutsCommand(
   const conflicts = provider.scan().filter((conflict) => !conflict.shared);
   const imported = importedConflicts();
   if (conflicts.length === 0 && imported.length === 0) {
-    process.stdout.write(`${provider.name} already leaves every chord the editor needs alone\n`);
+    process.stdout.write(`no shortcut conflicts detected!\n`);
     return 0;
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stdout.write("run tode shortcut-setup on a terminal to decide these interactively\n");
+    process.stdout.write("run tode shortcut-setup in a terminal to continue\n");
     return 0;
   }
 
-  // with everything already decided the stepper has nothing to show, so the
-  // manager opens straight on the final table, ready for inline edits
   const { code, confirmed, reloadedLive, served, navigated } = await runManager(provider, false, bootUrl);
-  // the manager was just on screen, so the first open must not show it again
   if (served) markIntroShown();
   if (confirmed) {
     if (!reloadedLive) say(provider.reloadHint(), dim);
-    // applying navigated this very pane into the editor; the exit code is the
-    // editor session's own
     if (navigated) return code;
     return BOOT_AFTER_APPLY;
   }
-  // closing without applying needs no recap — tode shortcut-setup --status has it
   return code;
 }

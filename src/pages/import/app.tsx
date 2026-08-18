@@ -25,9 +25,10 @@ const post = async (url: string, payload?: unknown) => {
   return response.json();
 };
 
-/** Done during onboarding is a navigation, not an exit: the server names the
- * next screen and this pane simply goes there, so the terminal never flashes
- * back to its primary buffer between screens. */
+/**
+ * interesting, a post request? and then an answer
+ * suka suka, very interesting. i mean, you could technically use ipc here
+ */
 const done = async () => {
   const answer = await post("/done");
   if (answer && answer.next) location.replace(answer.next);

@@ -4,13 +4,9 @@ import http from "node:http";
 import type { TerminalPalette } from "../terminal/osc";
 import { ensurePagesBuilt, servePage } from "../webui/pages";
 
-/** The first-run import screen's server: the page itself is a prebuilt react
- * app (src/pages/import) served as static files; these routes are the whole
- * api. One question, the editors found on this machine, two buttons. */
 
 export interface ImportPageEditor {
   name: string;
-  /** png path for the app's icon, shown when it exists */
   iconPng?: string | null;
 }
 
@@ -23,10 +19,7 @@ export interface ImportReportRow {
 export interface ImportPageDeps {
   palette: TerminalPalette;
   editors: ImportPageEditor[];
-  /** Runs the actual import; returns the rows the page shows as the receipt. */
   run(name: string): ImportReportRow[];
-  /** During onboarding: the url the page should navigate to when it is done,
-   * so the pane never respawns between screens. Absent, done just closes. */
   next?(): Promise<string | null>;
 }
 
@@ -39,7 +32,6 @@ function iconDataUri(png: string | null | undefined): string | null {
   }
 }
 
-/** What the page fetches on load: the editors, icons inlined. */
 function importState(deps: ImportPageDeps) {
   return {
     editors: deps.editors.map((editor) => ({

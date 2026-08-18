@@ -16,7 +16,7 @@ import {
   VENDOR_DIR,
 } from "./runtime/paths";
 import { PINNED_VERSION } from "./runtime/release";
-import { ghosttyConfigDir, reloadGhostty, removeFreed } from "./shortcuts/ghostty";
+import { ghosttyConfigDir, reloadGhostty, removeFreed } from "./shortcuts/backends/ghostty";
 
 /** Everything tode ever wrote, removed. The inverse of installing and using
  * it: the shortcut overrides come out of the terminal's config, the font out
@@ -35,8 +35,6 @@ function confirm(question: string): Promise<boolean> {
   });
 }
 
-/** A terminal-browser tree that is already on disk, for a best-effort daemon
- * shutdown. Uninstalling must never download one just to shut it down. */
 function localBrowserBin(): string | null {
   const candidates = [
     path.join(VENDOR_DIR, "terminal-browser", "bin", "terminal-browser"),
@@ -51,8 +49,6 @@ function removeDir(dir: string): boolean {
   return true;
 }
 
-/** The bundled font, but only when the installed file is byte-for-byte the one
- * tode ships — a font the user put there themselves stays. */
 function removeFont(): boolean {
   const target = path.join(userFontsDir(), FONT_ASSET);
   try {
@@ -66,7 +62,6 @@ function removeFont(): boolean {
   }
 }
 
-/** The ~/.local/bin shim, but only when it is recognisably tode's own. */
 function removeShim(): boolean {
   const binHome =
     process.env.XDG_BIN_HOME && path.isAbsolute(process.env.XDG_BIN_HOME)
@@ -83,10 +78,9 @@ function removeShim(): boolean {
   }
 }
 
-/** One line, redrawn in place; a removal takes seconds and silence reads as a
- * hang. No spinner without a tty. */
 function spinner(label: string): () => void {
   if (!process.stdout.isTTY) return () => {};
+  // dont think this actually works
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let at = 0;
   const timer = setInterval(() => {
@@ -110,7 +104,6 @@ export async function uninstallCommand(args: string[]): Promise<number> {
 
   const stop = spinner("uninstalling");
 
-  // stop what is running, so nothing rewrites a directory mid-removal
   stopServer();
   const browser = localBrowserBin();
   if (browser) {
@@ -121,16 +114,12 @@ export async function uninstallCommand(args: string[]): Promise<number> {
     });
   }
 
-  // the one thing tode wrote outside its own homes besides the font: the
-  // keybind overrides and their include line in the terminal's config
   if (removeFreed(ghosttyConfigDir())) reloadGhostty();
 
   removeFont();
 
   for (const dir of [DATA_DIR, STATE_DIR, CACHE_DIR]) removeDir(dir);
 
-  // versioned trees only: the checkout someone develops in has no VERSION
-  // file and must never delete itself
   for (const root of new Set([INSTALL_ROOT, DEFAULT_INSTALL_ROOT])) {
     if (fs.existsSync(path.join(root, "VERSION"))) removeDir(root);
   }

@@ -1,6 +1,3 @@
-/** "workbench.action.reopenClosedEditor" -> "reopen closed editor",
- * "start_search" -> "start search": labels for rows nobody hand-wrote. A tail
- * too short to mean anything alone ("up", "toggle") keeps its parent. */
 export function words(id: string): string {
   const segments = id.split(".");
   let tail = segments.pop() ?? id;

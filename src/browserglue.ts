@@ -40,6 +40,9 @@ export function writeBrowserScripts(): { preload: string; mainScript: string } {
     // the same file `tode timing` reads; the proxy used to write it from a
     // beacon route, now the preload's message lands it here
     timingFile: `${CSS_FILE}.timing.json`,
+    /**
+     * i dont see any real reason we need to do this, seems overly abstract 
+     */
     modules: {
       livesync: path.join(__dirname, "livesync.js"),
       generate: path.join(__dirname, "theme", "generate.js"),

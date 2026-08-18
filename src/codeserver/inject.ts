@@ -150,28 +150,12 @@ export function createInjector(
   return server;
 }
 
-/** Two things the workbench cannot be told through settings.
- *
- * The last row of device pixels goes uncovered when the terminal reports a
- * fractional pixel ratio, and the page's own white canvas shows through it as a
- * hairline. Painting the root element covers the whole canvas whatever the
- * rounding does.
- *
- * There is also no setting for the font of the interface itself, only for the
- * editor and the terminal, so the rest of the workbench is styled here. */
 
-/** One fallback chain for every place a font family lands — the injected css
- * and the settings profile must never drift apart, or a machine without the
- * bundled font renders the chrome and the editor in different faces. Menlo
- * covers macOS; DejaVu and Liberation are what linux distributions ship. */
 export const FONT_FALLBACKS = `Menlo, "DejaVu Sans Mono", "Liberation Mono", monospace`;
 
 export function injectedCss(background: string, fontFamily: string): string {
   const stack = `"${fontFamily}", ${FONT_FALLBACKS}`;
   return [
-    // no skeleton, no placeholder shapes: while the workbench boots the pane
-    // is simply the terminal's own background — fake furniture never lines up
-    // with the real layout, and the swap reads as a flash
     `@font-face{font-family:"${fontFamily}";src:url("${FONT_ROUTE}") format("truetype");font-weight:100 900;font-display:block;}`,
     `html,body{background:${background} !important;}`,
     "html{overflow:hidden;}",
@@ -182,7 +166,6 @@ export function injectedCss(background: string, fontFamily: string): string {
     `.monaco-menu,.quick-input-widget,.monaco-hover,.notifications-toasts`,
     `{font-family:${stack} !important;}`,
     `:root{--monaco-monospace-font:${stack};}`,
-    // an empty editor stays empty: no letterpress picture, no shortcut tips
     ".editor-group-watermark{display:none !important;}",
   ].join("");
 }

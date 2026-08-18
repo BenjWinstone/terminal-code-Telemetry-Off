@@ -2,8 +2,6 @@ function columns(): number {
   return Math.max(process.stdout.columns ?? 80, 40);
 }
 
-/** Word-wraps into lines that fit the window, each carrying the given indent,
- * so a narrow pane wraps on purpose instead of mid-word. */
 export function wrap(text: string, indent: string): string[] {
   const width = Math.max(columns() - indent.length - 1, 20);
   const lines: string[] = [];

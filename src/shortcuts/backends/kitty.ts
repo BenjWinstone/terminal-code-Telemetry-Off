@@ -3,12 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { holdsStamp } from "../profile";
-import { makeEditorHolds } from "./ghostty";
-import type { EditorHold, FreedMove, ProviderConflict, ShortcutProvider } from "./provider";
-import { loadDecisions } from "./store";
-import { canonicalChord } from "./vscode-keymap";
-import { words } from "./words";
+import { holdsStamp } from "../../profile";
+import { makeEditorHolds } from "../holds";
+import type { EditorHold, FreedMove, ProviderConflict, ShortcutProvider } from "../provider";
+import { loadDecisions } from "../store";
+import { canonicalChord } from "../vscode-keymap";
+import { words } from "../words";
 
 export function isKitty(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.TERM === "xterm-kitty" || !!env.KITTY_WINDOW_ID || !!env.KITTY_PID;

@@ -52,12 +52,6 @@ function buildQuery(): string {
 
 const DONE = /\x1b\[\?[0-9;]*c/;
 
-/** Ask the terminal itself rather than reading a config file, so this works for
- * any terminal, and over ssh, where the colours live on the other end.
- *
- * The reply is read off the stream rather than polled, because raw mode puts the
- * descriptor in non blocking mode and a synchronous read would spin on EAGAIN
- * for the whole timeout whenever a terminal declines to answer. */
 export function queryTerminal(timeoutMs = 400): Promise<ParsedReplies | null> {
   return new Promise((resolve) => {
     if (!process.stdout.isTTY) return resolve(null);
@@ -78,7 +72,6 @@ export function queryTerminal(timeoutMs = 400): Promise<ParsedReplies | null> {
         input?.setRawMode(false);
       } catch {}
       try {
-        // the stream owns the descriptor once it exists, so only close it here
         if (input) input.destroy();
         else fs.closeSync(fd);
       } catch {}

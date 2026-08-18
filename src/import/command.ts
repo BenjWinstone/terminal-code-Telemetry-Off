@@ -69,7 +69,6 @@ export async function importCommand(args: string[]): Promise<number> {
   return 0;
 }
 
-/** The import receipt as rows, shared by the cli and the first-run page. */
 export function reportRows(report: ReturnType<typeof runImport>): ImportReportRow[] {
   const rows: ImportReportRow[] = [];
   if (report.extensions.copied.length) {

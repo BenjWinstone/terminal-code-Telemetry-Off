@@ -10,7 +10,7 @@ function freshRequire(name) {
 }
 
 test("ghostty keybinds parse from +list-keybinds output", () => {
-  const { parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const { parseKeybinds } = require("../dist/shortcuts/backends/ghostty.js");
   const table = parseKeybinds(
     [
       "keybind = super+w=close_surface",
@@ -25,7 +25,7 @@ test("ghostty keybinds parse from +list-keybinds output", () => {
 });
 
 test("freeing chords writes only tode's file and one include line, and undoes cleanly", () => {
-  const { writeFreed, removeFreed, freedTriggers, withInclude, INCLUDE_LINE } = require("../dist/shortcuts/ghostty.js");
+  const { writeFreed, removeFreed, freedTriggers, withInclude, INCLUDE_LINE } = require("../dist/shortcuts/backends/ghostty.js");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-ghostty-"));
   const configFile = path.join(dir, "config");
   const own = "font-size = 14\nkeybind = super+q=quit\n";
@@ -53,7 +53,7 @@ test("freeing chords writes only tode's file and one include line, and undoes cl
 });
 
 test("only chords bound to something other than unbind or ignore are conflicts", () => {
-  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/backends/ghostty.js");
   const holds = (chord) =>
     ({
       "cmd+backspace": [{ command: "deleteAllLeft" }],
@@ -70,7 +70,7 @@ test("only chords bound to something other than unbind or ignore are conflicts",
 });
 
 test("a chord ghostty never bound at all is not a conflict", () => {
-  const { allConflicts } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts } = require("../dist/shortcuts/backends/ghostty.js");
   assert.deepEqual(allConflicts(new Map(), new Set(), () => [{ command: "undo" }]), []);
 });
 
@@ -80,7 +80,7 @@ test("the exact regression: what ghostty 1.3.1 actually ships for these", () => 
   // The text: rewrites (cmd+left/right/backspace) are deliberately NOT
   // conflicts: they reach the editor as ctrl+a/ctrl+e/ctrl+u, which vscode's
   // mac keymap already understands, so the behaviour survives the rewrite.
-  const { parseKeybinds, allConflicts } = require("../dist/shortcuts/ghostty.js");
+  const { parseKeybinds, allConflicts } = require("../dist/shortcuts/backends/ghostty.js");
   // what the mac workbench holds on these, keyed by canonical chord
   const holds = (chord) =>
     ({
@@ -111,7 +111,7 @@ test("the exact regression: what ghostty 1.3.1 actually ships for these", () => 
 test("linux ghostty defaults: new_tab is the conflict, the ctrl+shift pairs are not", () => {
   // pinned from ghostty's linux defaults: ctrl+shift chords, with undo, redo,
   // select_all and quit unbound
-  const { parseKeybinds, allConflicts } = require("../dist/shortcuts/ghostty.js");
+  const { parseKeybinds, allConflicts } = require("../dist/shortcuts/backends/ghostty.js");
   const holds = (chord) =>
     ({
       "ctrl+shift+t": [{ command: "workbench.action.reopenClosedEditor" }],
@@ -135,7 +135,7 @@ test("linux ghostty defaults: new_tab is the conflict, the ctrl+shift pairs are 
 });
 
 test("a move writes the unbind and the rebind, carrying the action", () => {
-  const { keybindsFileContents } = require("../dist/shortcuts/ghostty.js");
+  const { keybindsFileContents } = require("../dist/shortcuts/backends/ghostty.js");
   const contents = keybindsFileContents([
     { trigger: "super+w", to: "ctrl+alt+w", action: "close_surface" },
     { trigger: "super+z" },
@@ -147,7 +147,7 @@ test("a move writes the unbind and the rebind, carrying the action", () => {
 });
 
 test("the include line survives a config with no trailing newline", () => {
-  const { withInclude } = require("../dist/shortcuts/ghostty.js");
+  const { withInclude } = require("../dist/shortcuts/backends/ghostty.js");
   const out = withInclude("window-save-state = always");
   assert.equal(out.split("\n").filter((l) => l.startsWith("config-file")).length, 1);
   assert.ok(out.includes("window-save-state = always\nconfig-file"), "must not run onto the same line");
@@ -166,7 +166,7 @@ test("typed chords normalize into mod order, or are rejected", () => {
 });
 
 test("the on-complete reload walks the ancestry to ghostty and signals it", () => {
-  const { reloadGhostty } = require("../dist/shortcuts/ghostty.js");
+  const { reloadGhostty } = require("../dist/shortcuts/backends/ghostty.js");
   // this process (a node child of pid 500), whose parent 500 is ghostty
   const tree = {
     [process.pid]: { ppid: 500, command: "node" },
@@ -190,14 +190,14 @@ test("the on-complete reload walks the ancestry to ghostty and signals it", () =
 });
 
 test("editor chords translate to ghostty trigger syntax", () => {
-  const { toTrigger } = require("../dist/shortcuts/ghostty.js");
+  const { toTrigger } = require("../dist/shortcuts/backends/ghostty.js");
   assert.equal(toTrigger("cmd+w"), "super+w");
   assert.equal(toTrigger("cmd+left"), "super+arrow_left");
   assert.equal(toTrigger("ctrl+shift+w"), "ctrl+shift+w");
 });
 
 test("ghostty triggers translate back to editor chords, or to nothing", () => {
-  const { fromTrigger, parseTrigger } = require("../dist/shortcuts/ghostty.js");
+  const { fromTrigger, parseTrigger } = require("../dist/shortcuts/backends/ghostty.js");
   assert.equal(fromTrigger("super+f"), "cmd+f");
   assert.equal(fromTrigger("super+shift+p"), "shift+cmd+p", "mods land in canonical order");
   assert.equal(fromTrigger("super+arrow_left"), "cmd+left");
@@ -241,7 +241,7 @@ test("the platform keymap answers with this platform's chords", () => {
 });
 
 test("derived conflicts: a bind on a chord the editor holds surfaces, nothing else does", () => {
-  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/backends/ghostty.js");
   const holds = (chord) =>
     ({
       "cmd+f": [{ command: "actions.find" }],
@@ -280,13 +280,13 @@ test("macOS native tab cycling frees by rebinding to bytes — an unbind hands i
   // runs. A bound trigger stays ghostty's, so freeing writes a rebind that
   // emits the chord itself; unbinding would change nothing.
   if (process.platform !== "darwin") return;
-  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/backends/ghostty.js");
   const holds = () => [{ command: "workbench.action.quickOpenNavigateNext" }];
   const live = parseKeybinds([
     "keybind = ctrl+tab=next_tab",
     "keybind = ctrl+shift+tab=previous_tab",
   ].join("\n"));
-  const { withEmits } = require("../dist/shortcuts/ghostty.js");
+  const { withEmits } = require("../dist/shortcuts/backends/ghostty.js");
   const conflicts = allConflicts(live, new Set(), holds);
   assert.deepEqual(conflicts.map((c) => c.editorId), ["ctrl+tab", "ctrl+shift+tab"]);
   // freeing those rows completes into emit rebinds — on a live free (action
@@ -308,7 +308,7 @@ test("macOS native tab cycling frees by rebinding to bytes — an unbind hands i
 });
 
 test("emit rebinds are written instead of unbind, and count as freed", () => {
-  const { keybindsFileContents, writeFreed, freedTriggers, emitSequence } = require("../dist/shortcuts/ghostty.js");
+  const { keybindsFileContents, writeFreed, freedTriggers, emitSequence } = require("../dist/shortcuts/backends/ghostty.js");
   assert.equal(emitSequence("ctrl+tab"), "esc:[27;5;9~");
   assert.equal(emitSequence("ctrl+shift+tab"), "esc:[27;6;9~");
   assert.equal(emitSequence("cmd+f"), "esc:[27;9;102~");
@@ -332,7 +332,7 @@ test("emit rebinds are written instead of unbind, and count as freed", () => {
 });
 
 test("derived conflicts: custom binds and prefixes behave", () => {
-  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseKeybinds } = require("../dist/shortcuts/backends/ghostty.js");
   const holds = (chord) => (chord === "cmd+p" ? [{ command: "workbench.action.quickOpen" }] : []);
   const live = parseKeybinds([
     "keybind = super+p=toggle_tab_overview",
@@ -348,7 +348,7 @@ test("derived conflicts: custom binds and prefixes behave", () => {
 });
 
 test("descriptions come from ghostty's own action docs, id-cleanup is the fallback", () => {
-  const { allConflicts, parseActionDocs, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts, parseActionDocs, parseKeybinds } = require("../dist/shortcuts/backends/ghostty.js");
   const docs = parseActionDocs(
     [
       "undo:",
@@ -380,7 +380,7 @@ test("descriptions come from ghostty's own action docs, id-cleanup is the fallba
 });
 
 test("a freed chord stays listed, and the freeing decision recalls its action", () => {
-  const { allConflicts } = require("../dist/shortcuts/ghostty.js");
+  const { allConflicts } = require("../dist/shortcuts/backends/ghostty.js");
   const holds = (chord) => (chord === "cmd+f" ? [{ command: "actions.find" }] : []);
   const freed = new Set(["super+f"]);
   const past = (chord) => (chord === "cmd+f" ? "start_search" : null);
@@ -495,12 +495,10 @@ test("an imported binding on any tode builtin is a conflict; removals and tode's
     fs.writeFileSync(file, JSON.stringify([{ key: QUIT_CHORD, command: "tode.confirmQuit", when: "!terminalFocus" }]));
     assert.equal(quit(), null, "a hand-written tode bind is not a conflict");
 
-    // the pane chords are tode builtins too — defended exactly like quit,
-    // nothing special-cased to one chord
+    // tode ships no pane chords: an imported binding on one is simply the
+    // user's binding now, not a conflict with tode
     fs.writeFileSync(file, JSON.stringify([{ key: "alt+w", command: "whatever.the.user.bound" }]));
-    const pane = importedConflicts().find((c) => c.key === "alt+w");
-    assert.equal(pane.builtin, "workbench.action.closeEditorsInGroup");
-    assert.equal(pane.claimant, "imported");
+    assert.equal(importedConflicts().find((c) => c.key === "alt+w"), undefined);
 
     fs.writeFileSync(file, JSON.stringify([{ key: "shift+ctrl+q", command: "taken" }]));
     assert.equal(importedHolder("ctrl+shift+q"), "taken", "modifier order does not hide a holder");
@@ -557,8 +555,9 @@ test("an extension that contributes ctrl+q is a claimant, named by its display n
     // automatically, so the contest is the user's to decide
     assert.equal(importedConflicts().find((c) => c.key === QUIT_CHORD)?.claimant, "Vim");
 
-    // an unguarded claim on an ordinary builtin (no carve can split it) also
-    // needs a decision — vim holds no alt+w, so acme is the one that surfaces
+    // a claim on a chord tode does not bind is nobody's conflict: tode ships
+    // no pane chords, so acme keeps alt+w without a decision — while the
+    // holder scan itself stays generic over chords
     const acmeDir = path.join(EXTENSIONS_DIR, "acme.keys-1.0.0");
     fs.mkdirSync(acmeDir, { recursive: true });
     fs.writeFileSync(path.join(acmeDir, "package.json"), JSON.stringify({
@@ -574,9 +573,8 @@ test("an extension that contributes ctrl+q is a claimant, named by its display n
     ]));
     // the claim scan caches on the manifest's mtime; make the rewrite visible
     fs.utimesSync(manifest, new Date(), new Date(Date.now() + 5000));
-    const claim = importedConflicts().find((c) => c.key === "alt+w");
-    assert.equal(claim.claimant, "Acme Keys");
-    assert.equal(claim.builtin, "workbench.action.closeEditorsInGroup");
+    assert.equal(extensionHolder("alt+w").command, "acme.everything");
+    assert.equal(importedConflicts().find((c) => c.key === "alt+w"), undefined);
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -640,7 +638,7 @@ test("the quit chord lives at user level, unless a decision moved or surrendered
   }
 });
 
-test("builtins carve for extension claims, but the quit chord never yields", () => {
+test("the quit chord never yields to extension claims", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-yield-"));
   const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_DATA_HOME = path.join(home, "share");
@@ -654,21 +652,14 @@ test("builtins carve for extension claims, but the quit chord never yields", () 
       name: "vim",
       contributes: { keybindings: [
         { key: store.QUIT_CHORD, command: "extension.vim_quit", when: "editorTextFocus && vim.active" },
-        { key: "alt+1", command: "extension.vim_window1", when: "editorTextFocus && vim.active" },
       ] },
     }));
     fs.writeFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), JSON.stringify([
       { identifier: { id: "vscodevim.vim" }, relativeLocation: "vscodevim.vim-1.30.0" },
     ]));
 
-    // an ordinary builtin carves the claim's own when clause out of its guard
-    // — no extension is named anywhere in the mechanism
-    const profile = require("../dist/profile.js");
-    const pane = profile.builtinKeybindings().find((bind) => bind.key === "alt+1");
-    assert.ok(pane.when.includes("!(editorTextFocus && vim.active)"), pane.when);
-
-    // the quit chord is the exception: quitting must always work, so its
-    // guard never yields — the claim surfaces in the wizard instead
+    // quitting must always work, so the quit chord's guard never yields to
+    // an extension's claim — the claim surfaces in the wizard instead
     const [quit] = store.quitBindings();
     assert.ok(!quit.when.includes("!("), quit.when);
     const { importedConflicts } = require("../dist/shortcuts/imported.js");
@@ -1051,6 +1042,14 @@ test("a chord is not taken by another spelling of the row's own binding", () => 
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    // the user's own file binds alt+1 on the editor side — tode itself ships
+    // no pane chords, so the cross-side holder comes from keybindings.json
+    const { USER_DIR } = require("../dist/profile.js");
+    fs.mkdirSync(USER_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(USER_DIR, "keybindings.json"),
+      JSON.stringify([{ key: "alt+1", command: "workbench.action.focusFirstEditorGroup" }]),
+    );
     // ghostty binds both super+1 and alt+1 to goto_tab:1 — the cmd+1 row
     // moving onto alt+1 lands on its own action, not a conflict
     const provider = {
@@ -1068,7 +1067,7 @@ test("a chord is not taken by another spelling of the row's own binding", () => 
       describe: (action) => `runs ${action}`,
     };
     // the terminal mover's own action on another trigger is exempt — but the
-    // EDITOR-side holder at alt+1 (tode's builtin pane chord) is cross-side
+    // EDITOR-side holder at alt+1 (the user's own binding) is cross-side
     // and must claim: after apply the terminal bind would eat it, and the
     // rescan counts exactly that as a conflict
     const vetted = wizard.chordTaken(provider, {}, "alt+1", "cmd+1", undefined, "terminal");
@@ -1132,6 +1131,14 @@ test("holders of a decided target chord join the row as contested claims", () =>
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    // the editor side of alt+1 is the user's own binding — tode ships no
+    // pane chords, so the cross-side holder comes from keybindings.json
+    const { USER_DIR } = require("../dist/profile.js");
+    fs.mkdirSync(USER_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(USER_DIR, "keybindings.json"),
+      JSON.stringify([{ key: "alt+1", command: "workbench.action.focusFirstEditorGroup" }]),
+    );
     const provider = {
       id: "ghostty", name: "Ghostty",
       detect: () => true, ready: () => null,
@@ -1168,8 +1175,8 @@ test("holders of a decided target chord join the row as contested claims", () =>
       "the chain walks decided moves to their holders",
     );
     // moved onto another trigger of its own action: the same-side self-duel
-    // stays out, but the editor-side holder there (tode's builtin) joins —
-    // the rescan would count it, so the duel must show it now
+    // stays out, but the editor-side holder there (the user's binding) joins
+    // — the rescan would count it, so the duel must show it now
     const self = wizard.managerRows(provider, {
       "cmd+1": { choice: "terminal", key: "alt+1", action: "goto_tab:1" },
     });
@@ -1303,12 +1310,19 @@ test("applied resolutions never come back: removals mask every holder source", (
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
     const { USER_DIR } = require("../dist/profile.js");
-    const { makeEditorHolds, allConflicts } = require("../dist/shortcuts/ghostty.js");
+    const { allConflicts } = require("../dist/shortcuts/backends/ghostty.js");
+    const { makeEditorHolds } = require("../dist/shortcuts/holds.js");
     const provider = {
       id: "ghostty", name: "Ghostty",
       scan: () => [], takenAs: () => null, describe: (action) => action,
     };
-    // tode's own builtin holds alt+1 — the wizard would claim it...
+    // the user's own binding holds alt+1 — the wizard would claim it...
+    const file = path.join(USER_DIR, "keybindings.json");
+    fs.mkdirSync(USER_DIR, { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify([{ key: "alt+1", command: "workbench.action.focusFirstEditorGroup" }]),
+    );
     const before = wizard.chordTaken(provider, {}, "alt+1", "cmd+w");
     assert.equal(before.claim.command, "workbench.action.focusFirstEditorGroup");
     // ...and a live ghostty bind on alt+1 would be a conflict row
@@ -1316,12 +1330,14 @@ test("applied resolutions never come back: removals mask every holder source", (
     const open = allConflicts(effective, new Set(), makeEditorHolds(), () => null, new Map());
     assert.equal(open.length, 1, "an unresolved holder is a conflict");
 
-    // the wizard resolves it; apply writes the removal into keybindings.json
-    const file = path.join(USER_DIR, "keybindings.json");
-    fs.mkdirSync(USER_DIR, { recursive: true });
+    // the wizard resolves it; apply writes the removal into keybindings.json,
+    // after the rule it masks
     fs.writeFileSync(
       file,
-      JSON.stringify([{ key: "alt+1", command: "-workbench.action.focusFirstEditorGroup" }]),
+      JSON.stringify([
+        { key: "alt+1", command: "workbench.action.focusFirstEditorGroup" },
+        { key: "alt+1", command: "-workbench.action.focusFirstEditorGroup" },
+      ]),
     );
     // the invariant: a rerun sees the resolution everywhere the holder shows
     assert.equal(
@@ -1346,7 +1362,7 @@ test("applied resolutions never come back: removals mask every holder source", (
 });
 
 test("kitty triggers translate both ways, or to nothing", () => {
-  const { toTrigger, fromTrigger } = require("../dist/shortcuts/kitty.js");
+  const { toTrigger, fromTrigger } = require("../dist/shortcuts/backends/kitty.js");
   assert.equal(toTrigger("ctrl+shift+w"), "ctrl+shift+w");
   assert.equal(toTrigger("cmd+pageup"), "super+page_up");
   assert.equal(fromTrigger("ctrl+shift+c"), "ctrl+shift+c");
@@ -1360,7 +1376,7 @@ test("kitty triggers translate both ways, or to nothing", () => {
 test("kitty conflicts derive from the parser dump: binds on held chords, prefixes included", () => {
   // pinned from kitty 0.45.0's own load_config() resolution, so a future kitty
   // that changes its defaults shows up here rather than silently
-  const { allConflicts } = require("../dist/shortcuts/kitty.js");
+  const { allConflicts } = require("../dist/shortcuts/backends/kitty.js");
   const holds = (chord) =>
     ({
       "ctrl+shift+c": [{ command: "workbench.action.terminal.copySelection" }],
@@ -1401,7 +1417,7 @@ test("kitty conflicts derive from the parser dump: binds on held chords, prefixe
 });
 
 test("kitty actions that pass through when they cannot act are not conflicts", () => {
-  const { allConflicts } = require("../dist/shortcuts/kitty.js");
+  const { allConflicts } = require("../dist/shortcuts/backends/kitty.js");
   const holds = () => ({ command: "editor.action.insertCursorAbove" });
   const keymap = {
     binds: [
@@ -1418,7 +1434,7 @@ test("kitty actions that pass through when they cannot act are not conflicts", (
 });
 
 test("a shared free rebinds to the compatible action instead of unmapping", () => {
-  const { withSharedRebinds, keybindsFileContents } = require("../dist/shortcuts/kitty.js");
+  const { withSharedRebinds, keybindsFileContents } = require("../dist/shortcuts/backends/kitty.js");
   const moves = withSharedRebinds([
     { trigger: "ctrl+shift+c", action: "copy_to_clipboard" },
     { trigger: "ctrl+shift+t", action: "new_tab" },
@@ -1433,7 +1449,7 @@ test("a shared free rebinds to the compatible action instead of unmapping", () =
 });
 
 test("a compatible rebind counts as freed when the file is read back", () => {
-  const { writeFreed, freedTriggers, withSharedRebinds } = require("../dist/shortcuts/kitty.js");
+  const { writeFreed, freedTriggers, withSharedRebinds } = require("../dist/shortcuts/backends/kitty.js");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tode-kitty-"));
   try {
     writeFreed(dir, withSharedRebinds([
@@ -1451,7 +1467,7 @@ test("a compatible rebind counts as freed when the file is read back", () => {
 });
 
 test("a chord tode already freed stays visible with its remembered action", () => {
-  const { allConflicts } = require("../dist/shortcuts/kitty.js");
+  const { allConflicts } = require("../dist/shortcuts/backends/kitty.js");
   const holds = () => [{ command: "workbench.action.terminal.copySelection" }];
   const past = (chord) => (chord === "ctrl+shift+c" ? "copy_to_clipboard" : null);
   // the dump omits passthrough keys, so a freed trigger only exists in the file
@@ -1463,7 +1479,7 @@ test("a chord tode already freed stays visible with its remembered action", () =
 
 test("kitty frees write bare maps, refuse prefix rebinds, and undo cleanly", () => {
   const { writeFreed, removeFreed, freedTriggers, withInclude, INCLUDE_LINE, keybindsFileContents } =
-    require("../dist/shortcuts/kitty.js");
+    require("../dist/shortcuts/backends/kitty.js");
   const contents = keybindsFileContents([
     { trigger: "ctrl+shift+c" },
     { trigger: "ctrl+shift+t", to: "ctrl+alt+t", action: "new_tab" },
@@ -1494,7 +1510,7 @@ test("kitty frees write bare maps, refuse prefix rebinds, and undo cleanly", () 
 });
 
 test("the kitty reload walks the ancestry and sends SIGUSR1", () => {
-  const { reloadKitty } = require("../dist/shortcuts/kitty.js");
+  const { reloadKitty } = require("../dist/shortcuts/backends/kitty.js");
   const tree = {
     [process.pid]: { ppid: 500, command: "node" },
     500: { ppid: 10, command: "/usr/bin/kitty" },

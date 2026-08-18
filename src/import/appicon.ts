@@ -131,7 +131,9 @@ export function editorIconPng(editorName: string): string | null {
   const cached = path.join(CACHE_DIR, "app-icons", `${slug(editorName)}-${stamp}.png`);
   if (fs.existsSync(cached)) return cached;
   try {
+    
     fs.mkdirSync(path.dirname(cached), { recursive: true });
+    // sips? whats sips
     execFileSync(
       "sips",
       ["-z", "64", "64", "-s", "format", "png", icns, "--out", cached],

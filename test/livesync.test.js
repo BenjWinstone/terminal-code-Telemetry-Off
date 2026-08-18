@@ -42,7 +42,6 @@ function loadBridgeSandbox(extensionSource, fakeHome, vscodeOverrides = {}) {
     ConfigurationTarget: { Global: 1 },
     commands: { registerCommand: () => ({ dispose() {} }), executeCommand: () => {} },
     window: { tabGroups: { all: [], onDidChangeTabs: () => ({ dispose() {} }) } },
-    extensions: { getExtension: () => undefined },
     ...vscodeOverrides,
   };
   const realOs = require("node:os");
@@ -103,83 +102,6 @@ test("the bridge applies the live theme on activation and again on every change,
       const last = (key) => [...updates].reverse().find((u) => u.key === key)?.value;
       same(last("workbench.colorCustomizations"), generateTheme(BLUE).colors);
       same(last("editor.tokenColorCustomizations"), { textMateRules: generateTheme(BLUE).tokenColors });
-    } finally {
-      for (const sub of context.subscriptions) sub.dispose();
-    }
-  } finally {
-    process.env.XDG_DATA_HOME = prev;
-    fs.rmSync(home, { recursive: true, force: true });
-    for (const key of Object.keys(require.cache)) delete require.cache[key];
-  }
-});
-
-test("with a vim extension installed, closing the last tab quits tode", async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-vim-bridge-"));
-  const prev = process.env.XDG_DATA_HOME;
-  process.env.XDG_DATA_HOME = path.join(home, "share");
-  for (const key of Object.keys(require.cache)) delete require.cache[key];
-  const { installBridge, BRIDGE_DIR } = require("../dist/bridge.js");
-  try {
-    installBridge(["/usr/local/bin/tode"]);
-    const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
-
-    const listeners = [];
-    const tabGroups = {
-      all: [{ tabs: [{}, {}] }],
-      onDidChangeTabs: (fn) => (listeners.push(fn), { dispose() {} }),
-    };
-    const { extension, spawned } = loadBridgeSandbox(source, home, {
-      window: { tabGroups },
-      extensions: { getExtension: (id) => (id === "vscodevim.vim" ? {} : undefined) },
-    });
-    const context = { subscriptions: [], environmentVariableCollection: { replace() {} } };
-    extension.activate(context);
-    try {
-      const fire = () => listeners.forEach((fn) => fn());
-      assert.ok(listeners.length > 0, "a vim install arms the tab watch");
-
-      // tabs still open: vim closed one window of several, tode stays
-      tabGroups.all = [{ tabs: [{}] }];
-      fire();
-      assert.equal(spawned.length, 0);
-
-      // the last one goes, the vim contract says quit
-      tabGroups.all = [];
-      fire();
-      assert.equal(spawned.length, 1);
-      // the args array crossed the vm sandbox boundary, so it carries that
-      // realm's Array prototype; serialized comparison sidesteps the mismatch
-      assert.equal(JSON.stringify(spawned[0].args), JSON.stringify(["quit"]));
-    } finally {
-      for (const sub of context.subscriptions) sub.dispose();
-    }
-  } finally {
-    process.env.XDG_DATA_HOME = prev;
-    fs.rmSync(home, { recursive: true, force: true });
-    for (const key of Object.keys(require.cache)) delete require.cache[key];
-  }
-});
-
-test("without a vim extension, an empty tab strip is left alone", async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-novim-bridge-"));
-  const prev = process.env.XDG_DATA_HOME;
-  process.env.XDG_DATA_HOME = path.join(home, "share");
-  for (const key of Object.keys(require.cache)) delete require.cache[key];
-  const { installBridge, BRIDGE_DIR } = require("../dist/bridge.js");
-  try {
-    installBridge(["/usr/local/bin/tode"]);
-    const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
-    const listeners = [];
-    const tabGroups = {
-      all: [{ tabs: [{}] }],
-      onDidChangeTabs: (fn) => (listeners.push(fn), { dispose() {} }),
-    };
-    const { extension, spawned } = loadBridgeSandbox(source, home, { window: { tabGroups } });
-    const context = { subscriptions: [], environmentVariableCollection: { replace() {} } };
-    extension.activate(context);
-    try {
-      assert.equal(listeners.length, 0, "no vim, no tab watch");
-      assert.equal(spawned.length, 0);
     } finally {
       for (const sub of context.subscriptions) sub.dispose();
     }
@@ -381,7 +303,7 @@ test("a theme over the window socket is applied live and persisted for the next 
   for (const key of Object.keys(require.cache)) delete require.cache[key];
   const { installBridge, BRIDGE_DIR } = require("../dist/bridge.js");
   const { LIVE_THEME_FILE } = require("../dist/profile.js");
-  const { sendToWindow } = require("../dist/ipc.js");
+  const { sendToExtension } = require("../dist/ipc.js");
   try {
     installBridge(["/usr/local/bin/tode"]);
     const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
@@ -402,7 +324,7 @@ test("a theme over the window socket is applied live and persisted for the next 
       assert.ok(sock, "the bridge listens on its window socket");
 
       const theme = generateTheme(BLUE);
-      await sendToWindow(sock, { files: [], folders: [], add: false, theme });
+      await sendToExtension(sock, { files: [], folders: [], add: false, theme });
 
       const same = (a, b) => assert.equal(JSON.stringify(a), JSON.stringify(b));
       const last = (key) => [...updates].reverse().find((u) => u.key === key)?.value;

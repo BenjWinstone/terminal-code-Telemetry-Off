@@ -30,7 +30,7 @@ export interface Decisions {
   choices: Record<string, Decision>;
 }
 
-const DECISIONS_FILE = path.join(DATA_DIR, "shortcuts.json");
+export const DECISIONS_FILE = path.join(DATA_DIR, "shortcuts.json");
 
 /** The decision file's mtime, for cache keys that must react to an apply. */
 export function decisionsStamp(): number {
@@ -59,40 +59,21 @@ export function clearDecisions(): void {
   fs.rmSync(DECISIONS_FILE, { force: true });
 }
 
-/** Where quitting lives, per platform. On macOS ctrl+c is free — copy is
- * cmd+c — and it is the terminal reflex for "make it stop", so it quits
- * (behind a confirm). On linux ctrl+c is canonically copy, so quit sits on
- * ctrl+q and ctrl+c only redirects. */
 export const QUIT_CHORD = process.platform === "darwin" ? "ctrl+c" : "ctrl+q";
 
-/** What the quit chord runs, wherever a decision carries it. Quitting always
- * asks first. */
 export const QUIT_COMMAND = "tode.confirmQuit";
 
-/** The decision for the quit chord an *import* took, keyed apart from the
- * terminal conflict on the same chord so deciding one never erases the other. */
 export const IMPORT_DECISION_ID = `import:${QUIT_CHORD}`;
 
-/** The decision about the *claimant's* side of that chord — an extension's
- * own binding, unset or moved through vscode's user-level removal entries. */
 export const CLAIM_DECISION_ID = `claim:${QUIT_CHORD}`;
 
-/** vscode removes a specific rule when a user entry names the same key with
- * the command negated — its own documented mechanism, so unsetting or moving
- * an extension's binding never touches the extension. Claim decisions exist
- * per chord ("claim:<chord>"), because any capture can run into any
- * extension's binding. */
 export function claimBindings(): { key: string; command: string; when?: string }[] {
   const choices = loadDecisions()?.choices ?? {};
   const out: { key: string; command: string; when?: string }[] = [];
   for (const [id, decision] of Object.entries(choices)) {
     if (!id.startsWith("claim:")) continue;
-    // a terminal-held claim resolves through the provider's freed file, not
-    // through keybindings.json
     if (decision.owner === "terminal") continue;
     if (decision.choice !== "terminal" || !decision.action) continue;
-    // the id may name the claim's command after a second colon, so two
-    // claimants on one chord never collide
     const rest = id.slice("claim:".length);
     const named = rest.indexOf(":");
     const chord = named === -1 ? rest : rest.slice(0, named);
@@ -102,12 +83,6 @@ export function claimBindings(): { key: string; command: string; when?: string }
   return out;
 }
 
-/** The bindings the import decisions ask for. Written after the imported
- * entries — vscode resolves keybindings.json bottom-up, last match wins — and
- * that ordering is the entire mechanism: nothing of the user's is edited or
- * removed for tode's chord to win. Import decisions exist per builtin chord
- * ("import:<chord>"); the command each carries was staged when it was made,
- * with the quit chord's known without one for decisions saved before that. */
 export function overrideBindings(): { key: string; command: string; when?: string }[] {
   const choices = loadDecisions()?.choices ?? {};
   const out: { key: string; command: string; when?: string }[] = [];
@@ -142,13 +117,6 @@ export function carvedWhen(base: string | undefined, chord: string): string | un
   return parts.length ? parts.join(" && ") : undefined;
 }
 
-/** The guard on tode's own quit binding. On macOS the quit chord doubles as
- * the reflex ctrl+c, so it also carries the hint's contexts.
- *
- * Deliberately never carved for extension claims: quitting must always work,
- * and an extension's guard can cover every one of its modes (vim's does), so
- * yielding automatically can leave no context where quit fires at all. An
- * extension gets the quit chord only through an explicit wizard decision. */
 export function quitWhen(): string {
   return QUIT_CHORD === "ctrl+c" ? HINT_BASE : "!terminalFocus";
 }
@@ -159,18 +127,12 @@ export function hintWhen(): string {
   return HINT_BASE;
 }
 
-/** The redirect hint exists only where ctrl+c is not itself the quit chord
- * (linux). It also lives at user level, above any extension's own ctrl+c. */
+// what is a hint binding? i dont think thats a thing??
 export function hintBindings(): { key: string; command: string; when: string }[] {
   if (QUIT_CHORD === "ctrl+c") return [];
   return [{ key: "ctrl+c", command: "tode.quitHint", when: hintWhen() }];
 }
 
-/** tode's quit chord written at user level, because extension keybindings
- * cannot be trusted to lose under editor focus. User keybindings outrank
- * every extension, so this one always wins inside its guard — unless a
- * wizard decision moved quit elsewhere (the fallback carries it then) or
- * surrendered it on purpose. */
 export function quitBindings(): { key: string; command: string; when?: string }[] {
   const choices = loadDecisions()?.choices ?? {};
   const decision = choices[IMPORT_DECISION_ID] ?? choices[QUIT_CHORD];
@@ -178,10 +140,6 @@ export function quitBindings(): { key: string; command: string; when?: string }[
   return [{ key: QUIT_CHORD, command: QUIT_COMMAND, when: quitWhen() }];
 }
 
-/** The keybindings the "editor" choices ask for, ready for keybindings.json.
- * Each decision staged the command its chord should run when it was made.
- * Read at profile-install time, so a re-run of the wizard lands on the next
- * open without any other coordination. */
 export function fallbackBindings(): { key: string; command: string; when?: string }[] {
   const decisions = loadDecisions();
   if (!decisions) return [];

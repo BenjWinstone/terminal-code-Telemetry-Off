@@ -45,9 +45,6 @@ function modified(file: string): number {
   }
 }
 
-/** Everything vscode shaped keeps its state in the platform's config home —
- * Application Support on macOS, ~/.config on linux — with a User folder and a
- * state database, whatever the product decided to call itself. */
 export function findEditors(): Editor[] {
   const support =
     process.platform === "darwin"

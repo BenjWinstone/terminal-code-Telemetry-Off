@@ -38,8 +38,6 @@ function copyTree(from: string, to: string): boolean {
   }
 }
 
-/** Their settings go in first and tode's own go back on top, because the ones
- * tode manages are what make the editor fit the terminal. */
 function importSettings(editor: Editor): ImportReport["settings"] {
   const from = path.join(editor.userDir, "settings.json");
   if (!fs.existsSync(from)) return null;
@@ -59,8 +57,6 @@ function importSettings(editor: Editor): ImportReport["settings"] {
   };
 }
 
-/** tode's ctrl chords go first so anything the user bound themselves, which
- * comes later, still wins. */
 function importKeybindings(editor: Editor): number | null {
   const from = path.join(editor.userDir, "keybindings.json");
   if (!fs.existsSync(from)) return null;
@@ -105,9 +101,6 @@ interface ExtensionEntry {
   metadata?: Record<string, unknown>;
 }
 
-/** The folders are copied rather than reinstalled from a marketplace, so the
- * versions match exactly and extensions that are not published anywhere public
- * still come across. */
 function importExtensions(
   editor: Editor,
   onProgress?: (done: number, total: number, id: string) => void,

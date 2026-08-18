@@ -31,9 +31,6 @@ const CODE_SERVER_BUILDS: Record<string, { asset: string; sha256: string; size: 
   },
 };
 
-/** Version-keyed and outside the install root on purpose: an upgrade replaces
- * the install tree whole, and a 200 MB bundle that did not change should not
- * ride along every time. */
 export function codeServerRoot(version = CODE_SERVER_VERSION): string {
   return path.join(DATA_DIR, "code-server", version);
 }
@@ -51,16 +48,12 @@ function onPath(): string | null {
   }
 }
 
-/** The pinned bundle if it is already on disk, the PATH one otherwise — never
- * the network. What a synchronous caller can have. */
 export function installedCodeServer(): string | null {
   const configured = process.env.TODE_CODE_SERVER;
   if (configured) return configured;
   return binAt(codeServerRoot()) ?? onPath();
 }
 
-/** Progress on stderr for a download someone is sitting through. Each percent
- * prints once, so the log form is readable too. */
 export function narrateFetch(label: string): (fraction: number) => void {
   let announced = false;
   let lastPercent = -1;
@@ -76,8 +69,6 @@ export function narrateFetch(label: string): (fraction: number) => void {
   };
 }
 
-/** The same resolution, but allowed to go and get the pinned bundle when this
- * machine has nothing yet. */
 export async function ensureCodeServer(
   onProgress?: (fraction: number) => void,
 ): Promise<string> {

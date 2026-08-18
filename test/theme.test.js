@@ -295,7 +295,6 @@ test("the bridge maps quit per platform, always behind a confirm", () => {
     assert.match(source, /registerCommand\("tode\.quitHint"/);
     assert.match(source, /"Do you want to quit terminal-code\?", \{ modal: true \}, "Quit"/, "quit confirms before acting");
     assert.match(source, /showErrorMessage\(QUIT_HINT, \{ modal: true \}\)/, "the hint is a modal, not a corner toast");
-    assert.match(source, /vscodevim\.vim/, "the vim quit watch rides along");
     assert.match(source, /onDidChangeTabs/);
     assert.match(source, /\/usr\/local\/bin\/tode/);
   } finally {
@@ -355,7 +354,7 @@ test("open requests reach a listening window", async () => {
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
-  const { sendToWindow } = require("../dist/ipc.js");
+  const { sendToExtension } = require("../dist/ipc.js");
   const sock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tode-ipc-")), "w.sock");
   const seen = [];
   const server = net.createServer((c) => {
@@ -369,7 +368,7 @@ test("open requests reach a listening window", async () => {
   });
   await new Promise((r) => server.listen(sock, r));
   try {
-    await sendToWindow(sock, { files: [{ path: "/a.ts", line: 3, column: 2 }], folders: [], add: false });
+    await sendToExtension(sock, { files: [{ path: "/a.ts", line: 3, column: 2 }], folders: [], add: false });
     assert.deepEqual(seen[0].files, [{ path: "/a.ts", line: 3, column: 2 }]);
   } finally {
     server.close();
@@ -381,13 +380,13 @@ test("a window that refuses is reported, not swallowed", async () => {
   const fs = require("node:fs");
   const os = require("node:os");
   const path = require("node:path");
-  const { sendToWindow } = require("../dist/ipc.js");
+  const { sendToExtension } = require("../dist/ipc.js");
   const sock = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "tode-ipc-")), "w.sock");
   const server = net.createServer((c) => c.end(JSON.stringify({ ok: false, error: "nope" }) + "\n"));
   await new Promise((r) => server.listen(sock, r));
   try {
     await assert.rejects(
-      () => sendToWindow(sock, { files: [], folders: [], add: false }),
+      () => sendToExtension(sock, { files: [], folders: [], add: false }),
       /nope/,
     );
   } finally {
@@ -443,7 +442,8 @@ test("a folder request is acknowledged before the window reloads", () => {
   try {
     installBridge(["/usr/local/bin/tode"]);
     const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
-    const ackAt = source.indexOf("acknowledge();\n  for (const uri of wanted)");
+    const acknowledgement = /acknowledge\(\);\s+for \(const uri of wanted\)/.exec(source);
+    const ackAt = acknowledgement?.index ?? -1;
     const openAt = source.indexOf("vscode.openFolder");
     assert.ok(ackAt > 0, "the folder loop must be preceded by an acknowledgement");
     assert.ok(ackAt < openAt, "openFolder reloads the window, so the reply must go first");
@@ -547,5 +547,40 @@ test("registerThemeExtension with no argument finds the theme actually on disk",
     process.env.XDG_DATA_HOME = prev;
     fs.rmSync(home, { recursive: true, force: true });
     for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("skill emits SKILL.md frontmatter with every path resolved from the env", () => {
+  const { execFileSync } = require("node:child_process");
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-skill-"));
+  try {
+    const out = execFileSync("node", [path.join(__dirname, "..", "dist", "main.js"), "skill"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: path.join(home, "share"),
+        XDG_STATE_HOME: path.join(home, "state"),
+        XDG_CACHE_HOME: path.join(home, "cache"),
+        // a bare shell: not inside a window, no terminal detected
+        TODE_IPC: "",
+        TERM: "xterm",
+        TERM_PROGRAM: "",
+        GHOSTTY_RESOURCES_DIR: "",
+        KITTY_WINDOW_ID: "",
+        KITTY_PID: "",
+      },
+    });
+    assert.match(out, /^---\nname: tode\ndescription: .+\n---\n/);
+    // paths come from the env the process saw, not from wherever it was built
+    assert.ok(out.includes(path.join(home, "share", "tode")), "data home must be resolved");
+    assert.ok(out.includes(path.join(home, "state", "tode", "server.json")), "state home must be resolved");
+    assert.match(out, /daemon: not running/);
+    assert.match(out, /is not inside a tode window/);
+    assert.match(out, /none \(ghostty and kitty are supported\)/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

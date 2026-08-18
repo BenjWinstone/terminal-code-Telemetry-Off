@@ -15,7 +15,7 @@ export function browserMain(ctx: MainCtx): void {
   const path = require("node:path") as typeof import("node:path");
   const { parseRawColors } = require(ctx.modules.livesync) as typeof import("../livesync");
   const { generateTheme } = require(ctx.modules.generate) as typeof import("../theme/generate");
-  const { sendToWindow } = require(ctx.modules.ipc) as typeof import("../ipc");
+  const { sendToExtension: sendToWindow } = require(ctx.modules.ipc) as typeof import("../ipc");
   const { ipcMain } = require("electron") as {
     ipcMain: { on(channel: string, listener: (event: unknown, message: unknown) => void): void };
   };
@@ -25,7 +25,7 @@ export function browserMain(ctx: MainCtx): void {
     if (timed && timed.type === "timing" && timed.page) {
       try {
         fs.writeFileSync(ctx.timingFile, JSON.stringify(timed.page));
-      } catch {}
+      } catch { }
       return;
     }
     const themed = message as ThemeMessage | null | undefined;
@@ -49,7 +49,7 @@ export function browserMain(ctx: MainCtx): void {
           if (error && (error.code === "ECONNREFUSED" || error.code === "ENOENT")) {
             try {
               fs.rmSync(socket, { force: true });
-            } catch {}
+            } catch { }
           }
         },
       );

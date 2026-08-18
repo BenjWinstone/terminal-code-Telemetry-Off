@@ -7,7 +7,7 @@ import { DATA_DIR, LOGS_DIR, STATE_DIR } from "../runtime/paths";
 import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetch } from "./vendored";
 
 const VSCODE_DIR = path.join(DATA_DIR, "vscode");
-const STATE_FILE = path.join(STATE_DIR, "server.json");
+export const STATE_FILE = path.join(STATE_DIR, "server.json");
 
 export interface ServerState {
   pid: number;
@@ -24,7 +24,7 @@ export interface ServerState {
 
 export const CSS_FILE = path.join(DATA_DIR, "inject.css");
 // kept apart from the run state, which is cleared on every stop
-const PORT_FILE = path.join(DATA_DIR, "injector.port");
+export const PORT_FILE = path.join(DATA_DIR, "injector.port");
 
 function fontAsset(): string {
   for (let dir = __dirname; ; dir = path.dirname(dir)) {
@@ -37,12 +37,8 @@ function fontAsset(): string {
 export function codeServerBin(): string {
   const found = installedCodeServer();
   if (found) return found;
-  /**
-   * stupid ass error
-   */
   throw new Error(
-    "no code-server on this machine yet — run `tode provision` to fetch the pinned build, " +
-      "or set TODE_CODE_SERVER to one you installed yourself",
+    "code-server not found" 
   );
 }
 
@@ -112,15 +108,10 @@ function serverVersion(bin: string): string {
   }
 }
 
-/** One code-server serves every folder, because the workbench takes the folder as
- * a url parameter. Opening a second project is a navigation, not another boot. */
 export async function ensureServer(): Promise<ServerState> {
   const existing = await currentServer();
   if (existing) return existing;
 
-  // allowed to download the pinned bundle: a fresh machine, or the first open
-  // after an upgrade moved the pin — narrated, because a silent 200 MB wait
-  // reads as a hang
   const bin = await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
   const port = await freePort();
   fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -142,16 +133,25 @@ export async function ensureServer(): Promise<ServerState> {
       "--disable-update-check",
       "--disable-workspace-trust",
       "--disable-getting-started-override",
-      // tode always says what it wants open, so the last one is never right
       "--ignore-last-opened",
     ],
-    { detached: true, stdio: ["ignore", log, log] },
+    {
+      detached: true,
+      stdio: ["ignore", log, log],
+      env: {
+        ...process.env,
+        EXTENSIONS_GALLERY: JSON.stringify({
+          serviceUrl: "https://marketplace.visualstudio.com/_apis/public/gallery",
+          itemUrl: "https://marketplace.visualstudio.com/items",
+          cacheUrl: "https://vscode.blob.core.windows.net/gallery/index",
+          controlUrl: "",
+        }),
+      },
+    },
   );
   child.unref();
   if (!child.pid) throw new Error("could not start code-server");
 
-  // the injector comes up straight away and holds requests until code-server is
-  // listening, so the browser can be starting at the same time rather than after
   const injector = await startInjector(port, log);
   void codeServerReady(port, child.pid).then((up) => {
     if (up) void warmUp(injector.port);
@@ -178,9 +178,6 @@ async function codeServerReady(port: number, pid: number): Promise<boolean> {
   return false;
 }
 
-/** The port ends up inside saved workspace files as the remote authority, and it
- * is also what chromium keys its cache on, so the same one is kept between runs
- * whenever it is still free. */
 async function injectorPort(portFile: string): Promise<number> {
   let previous = 0;
   try {
@@ -223,8 +220,6 @@ export async function startInjector(
   throw new Error("the css injector did not start within 10s");
 }
 
-/** code-server is a good deal slower answering its first request than its
- * second, so it gets asked for the workbench before anyone is waiting. */
 async function warmUp(port: number): Promise<void> {
   try {
     const page = await fetch(`http://127.0.0.1:${port}/`, {
@@ -254,7 +249,6 @@ export function stopServer(): boolean {
   return stopped;
 }
 
-/** The browser is pointed at the injector, never at code-server directly. */
 export function origin(state: ServerState): string {
   return `http://127.0.0.1:${state.injectorPort}/`;
 }

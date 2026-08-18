@@ -34,8 +34,6 @@ function readTrimmed(file: string): string | null {
   }
 }
 
-/** What this install is. A git checkout has no VERSION file, which is how
- * upgrade knows to refuse rather than overwrite someone's working tree. */
 export function installed(): { version: string; channel: string } | null {
   const version = readTrimmed(path.join(INSTALL_ROOT, "VERSION"));
   const channel = readTrimmed(path.join(INSTALL_ROOT, "CHANNEL"));

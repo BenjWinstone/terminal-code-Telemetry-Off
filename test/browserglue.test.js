@@ -129,7 +129,7 @@ function loadMainScript(ctx, sendToWindow) {
   let onMessage = null;
   const sandbox = {
     require: (id) => {
-      if (id === IPC_STUB) return { sendToWindow };
+      if (id === IPC_STUB) return { sendToExtension: sendToWindow };
       if (id === "electron") {
         return {
           ipcMain: {

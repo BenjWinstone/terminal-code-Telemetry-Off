@@ -3,8 +3,6 @@ import path from "node:path";
 
 import { EXTENSIONS_DIR, builtinKeybindings, foreignBindings, removalMasked } from "../profile";
 
-/** Chord equality the way vscode reads keys: modifier order and case do not
- * matter. */
 function sameChord(a: string, b: string): boolean {
   const canon = (chord: string) =>
     chord
@@ -33,24 +31,12 @@ export function importedHolder(chord: string): string | null {
 
 export interface ImportedConflict {
   key: string;
-  /** the tode builtin command this claim shadows */
   builtin: string;
   command: string;
-  /** who holds the chord: "imported" for keybindings.json, or the display
-   * name of the extension that contributes it */
   claimant: string;
-  /** a human reading of what the binding does, when one can be derived */
   describes?: string;
 }
 
-/** Every claimant sitting on a chord tode itself binds — quit, the pane
- * chords, all of them the same way. User keybindings outrank extension
- * keybindings in vscode, and both are written above tode's, so a claim here
- * silently wins over the builtin; the wizard surfaces each one next to the
- * terminal's conflicts. An extension claim is already split structurally when
- * the builtin's own guard carves the claim's context out (store.carvedWhen);
- * every other claim — unguarded, or on a chord that never yields, like quit —
- * still needs a decision. */
 export function importedConflicts(): ImportedConflict[] {
   const out: ImportedConflict[] = [];
   const seen = new Set<string>();
@@ -99,10 +85,6 @@ function describeCommand(
 
 type ContributedBinding = ExtensionClaim & { key: string };
 
-/** The scan walks every installed extension's package.json, and callers ask
- * per chord — sometimes ninety times in one pass — so the walk is cached and
- * keyed on extensions.json's mtime: an install or removal rewrites that file,
- * anything else leaves the cache warm. */
 let contributedCache: { stamp: string; bindings: ContributedBinding[] } | null = null;
 
 function contributedKeybindings(): ContributedBinding[] {
@@ -114,10 +96,6 @@ function contributedKeybindings(): ContributedBinding[] {
       return 0;
     }
   };
-  // the registry file alone is not enough: an import copies extension
-  // directories before the editor's first boot registers them, and their
-  // keybindings must count from the moment they are on disk — otherwise the
-  // wizard resolves against a smaller world than the next scan sees
   const stamp = `${mtime(manifest)}:${mtime(EXTENSIONS_DIR)}`;
   if (contributedCache && contributedCache.stamp === stamp) return contributedCache.bindings;
 
@@ -173,7 +151,6 @@ function contributedKeybindings(): ContributedBinding[] {
   return bindings;
 }
 
-/** Every extension binding on this chord, in install order. */
 export function extensionClaims(chord: string): ExtensionClaim[] {
   return contributedKeybindings()
     .filter((bind) => sameChord(bind.key, chord))

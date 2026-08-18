@@ -6,16 +6,10 @@ import type { TerminalPalette } from "../terminal/osc";
 import { ensurePagesBuilt, servePage } from "../webui/pages";
 import type { Decision } from "./store";
 
-/** One contested chord, flattened for the page. `kind` says who the other
- * claimant is: the terminal, or a keybinding the user imported. */
 export interface ManagerRow {
   id: string;
   kind: "terminal" | "import";
-  /** What the editor runs on the chord. */
   means: string;
-  /** The raw editor command id and the holding binding's when guard — the
-   * metadata the auto-generated label was made from, rendered as label →
-   * value rows. */
   detail?: { command: string; when?: string };
   terminal: {
     name: string;
@@ -23,21 +17,13 @@ export interface ManagerRow {
     does: string;
     freed: string;
     tradeoff: string;
-    /** Bound if tode freed nothing — the staged decision says the rest. */
     bound: boolean;
   };
   importedCommand?: string;
-  /** who else holds the chord: "imported", or an extension's display name */
   claimant?: string;
-  /** a human reading of what the claimant's binding does */
   claimDescribes?: string;
-  /** the decision about the claimant's own side (unset or moved), staged
-   * under its own key so it never collides with the tode-side decision */
   claimDecision?: Decision | null;
   decision: Decision | null;
-  /** other bindings seated in the duel as their own columns. A resting claim
-   * coexists on the row's own chord (informational until moved); a contested
-   * one holds a chord some decision moved onto, and counts immediately. */
   claims?: {
     chord: string;
     command: string;
@@ -45,29 +31,17 @@ export interface ManagerRow {
     describes: string;
     when?: string;
     resting?: boolean;
-    /** a staged decision about this claim from an earlier visit, so reloads
-     * pick up exactly where the session left off */
     decided?: Decision | null;
   }[];
 }
 
 export interface ManagerDeps {
-  /** Every managed row, decided or not. The stepper walks them one per
-   * screen; the confirm screen tables them all. */
   rows(): ManagerRow[];
-  /** What already holds a candidate chord, or null when it is free. `id` is
-   * the row asking and `command` the exact claim asking, when one is —
-   * another spelling of the asker's own binding is not a conflict with
-   * itself. When someone else holds it, `claim` describes the binding so the
-   * page can offer to unset or move it on the spot. */
   taken(chord: string, id?: string, command?: string, side?: "terminal" | "editor"): {
     holder: string;
     claim?: { chord: string; command: string; claimant: string; describes: string; when?: string };
   } | null;
-  /** Canonical form of a chord the page sends, or null when it is not one. */
   normalize(chord: string): string | null;
-  /** Stages one row's decision in memory (null clears it). Nothing lands on
-   * disk until confirm(). */
   decide(
     id: string,
     kind: "terminal" | "import" | "claim",
@@ -75,20 +49,12 @@ export interface ManagerDeps {
     side?: "claim" | "own",
     claim?: { command: string; when?: string },
   ): void;
-  /** Writes everything staged: the terminal's freed file, the decisions
-   * store, keybindings.json. */
   confirm(): { note: string };
-  /** Where the page should navigate when it is done — the next onboarding
-   * screen, or the editor after a standalone apply. Absent (or resolving
-   * null), done just closes the pane. */
   next?(): Promise<string | null>;
-  /** Whether a plain done leads onward (onboarding) or closes the pane —
-   * the page words its buttons accordingly. */
   continues?: boolean;
   reloadHint: string;
   terminalName: string;
   palette: TerminalPalette;
-  /** First-run mode: open on an intro screen that says why this is here. */
   intro?: boolean;
 }
 
@@ -102,9 +68,6 @@ function logoDataUri(name: string): string | null {
   }
 }
 
-/** What the page fetches on load: everything dynamic, next to nothing else —
- * the page itself is a prebuilt react app (src/pages/shortcuts) served as
- * static files. */
 function managerState(deps: ManagerDeps) {
   return {
     rows: deps.rows(),
@@ -124,17 +87,12 @@ function body(request: http.IncomingMessage): Promise<string> {
   });
 }
 
-/** The manager as a local http server: the page is the ui, these routes are
- * the whole api. Decisions stage in memory; only /confirm writes. Resolves
- * its `done` promise when the page asks to close. */
 export function startManager(
   deps: ManagerDeps,
 ): Promise<{ port: number; done: Promise<void>; close(): void; served(): boolean }> {
   ensurePagesBuilt();
   let finish: () => void;
   const done = new Promise<void>((resolve) => (finish = resolve));
-  // whether any browser ever fetched the page — the difference between a
-  // wizard the user saw and one that never made it onto the screen
   let served = false;
   const server = http.createServer(async (request, response) => {
     const ok = (payload: unknown, type = "application/json") => {
@@ -162,8 +120,6 @@ export function startManager(
                 sent.side === "terminal" || sent.side === "editor" ? sent.side : undefined,
               );
         if (info) {
-          // the canonical spelling rides along even on the claim path, so the
-          // page never stages a raw typed spelling that matches nothing
           return ok({
             ok: false,
             warning: `${chord} is already bound to ${info.holder}`,

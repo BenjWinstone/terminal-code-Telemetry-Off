@@ -59,8 +59,7 @@ function pageDir(name: PageName): string {
   return path.dirname(found);
 }
 
-/** The built page with the terminal's palette injected into <head>, so the
- * first paint is already themed rather than flashing browser-default white. */
+// if its a transform we need can't it be a vite plugin
 export function pageHtml(name: PageName, palette: TerminalPalette): string {
   const html = fs.readFileSync(path.join(pageDir(name), "index.html"), "utf8");
   const tokens = `<style id="tode-tokens">${cssTokens(palette)}</style>`;

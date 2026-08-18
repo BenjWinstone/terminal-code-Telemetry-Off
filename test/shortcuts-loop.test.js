@@ -79,7 +79,7 @@ test("closed loop: resolve everything, apply, rerun shows nothing", { timeout: 2
   process.env.XDG_CONFIG_HOME = path.join(home, "config");
 
   let wizard = freshRequire("../dist/shortcuts/wizard.js");
-  let ghostty = require("../dist/shortcuts/ghostty.js");
+  let ghostty = require("../dist/shortcuts/backends/ghostty.js");
   let store = require("../dist/shortcuts/store.js");
   let profile = require("../dist/profile.js");
 
@@ -346,7 +346,7 @@ test("closed loop: resolve everything, apply, rerun shows nothing", { timeout: 2
     session.confirm();
     simulateFirstBoot();
     wizard = freshRequire("../dist/shortcuts/wizard.js");
-    ghostty = require("../dist/shortcuts/ghostty.js");
+    ghostty = require("../dist/shortcuts/backends/ghostty.js");
     store = require("../dist/shortcuts/store.js");
     profile = require("../dist/profile.js");
     ghostty.setListKeybindsForTest(() => {
@@ -363,7 +363,7 @@ test("closed loop: resolve everything, apply, rerun shows nothing", { timeout: 2
     );
   } finally {
     try {
-      require("../dist/shortcuts/ghostty.js").setListKeybindsForTest(null);
+      require("../dist/shortcuts/backends/ghostty.js").setListKeybindsForTest(null);
     } catch {}
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;

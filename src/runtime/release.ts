@@ -108,17 +108,10 @@ function rootFor(version: string): string {
   return path.join(RUNTIME_DIR, "terminal-browser", version);
 }
 
-/** Every child terminal-browser starts is launched through this script, including
- * the one a split pane opens, so pointing it at tode's own directories here is
- * what keeps a standalone terminal-browser install and tode's from sharing a
- * database or a log. The daemon sockets never collide anyway — see the
- * BROWSER_HOME comment for why XDG_RUNTIME_DIR must stay untouched. */
 function writeLauncher(root: string) {
   const bin = path.join(root, "bin", "terminal-browser");
   const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
   const electron = path.relative(root, electronEntry(root));
-  // the scroll helper only ships in the macOS build; exporting a path that is
-  // not there would make terminal-browser try it anyway
   const scrollHelper =
     process.platform === "darwin"
       ? `export NATIVE_SCROLL_HELPER="\${NATIVE_SCROLL_HELPER:-$ROOT/bin/native-scroll-helper}"\n`
@@ -175,8 +168,6 @@ function cloneTree(from: string, to: string): boolean {
   return true;
 }
 
-/** Streams a url to disk while hashing it, and refuses the file when the bytes
- * are not the ones the release table promised. */
 export async function fetchVerified(
   url: string,
   sha256: string,
@@ -238,7 +229,6 @@ export interface ResolveOptions {
   onProgress?(stage: "cloning" | "downloading", fraction: number): void;
 }
 
-/** resolveRuntime with the download narrated on stderr, for interactive runs. */
 export async function resolveRuntimeWithProgress(): Promise<Runtime> {
   let announced = false;
   return resolveRuntime({
@@ -269,8 +259,6 @@ export async function resolveRuntime(options: ResolveOptions = {}): Promise<Runt
     return { bin: override, root, version: versionAt(root) ?? "override", source: "override" };
   }
 
-  // the vendored copy is checked first, and only for the version tode pins:
-  // asking for another version has to go and get that one
   if (version === PINNED_VERSION && usable(VENDORED, version)) {
     return { bin: writeLauncher(VENDORED), root: VENDORED, version, source: "vendored" };
   }

@@ -56,5 +56,6 @@ export const BROWSER_HOME = {
   data: path.join(DATA_DIR, "browser", "share"),
   state: path.join(STATE_DIR, "browser", "state"),
   cache: path.join(CACHE_DIR, "browser"),
+  // not sure why this is called chromium thats just wrong
   appData: path.join(DATA_DIR, "browser", "chromium"),
 };
