@@ -441,6 +441,7 @@ async function upgradeCommand(args: string[]): Promise<number> {
   const check = takeBool(args, "--check");
   const version = takeFlag(args, "--version");
   let announced = false;
+  let lastPercent = -1;
   const outcome = await upgrade({
     check,
     version,
@@ -451,6 +452,8 @@ async function upgradeCommand(args: string[]): Promise<number> {
         announced = true;
       }
       const percent = Math.round(fraction * 100);
+      if (percent === lastPercent) return;
+      lastPercent = percent;
       process.stderr.write(`\r  ${percent}%${percent === 100 ? "\n" : ""}`);
     },
   });
