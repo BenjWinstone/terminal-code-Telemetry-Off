@@ -98,18 +98,6 @@ function takeBool(args: string[], name: string): boolean {
   args.splice(at, 1);
   return true;
 }
-/**
- * im a little sus for some of these terminal commands, what is --what? is that a code thing?
- * 
- * perhaps
- * 
- * 
- * how are we doing theming again? i thought we're just using preload and main script
- * 
- * well maybe it calls into the cli with that, that seems plausible
- * 
- * provision is odd
- */
 
 const HELP = `Usage: tode [path...] [options]
        tode --<command>
@@ -254,9 +242,6 @@ async function openCommand(args: string[]): Promise<number> {
   const target = wanted[0] ?? resolveTarget(undefined, process.cwd());
   const runtime = await resolveRuntimeWithProgress();
   done("runtime");
-  // code-server is fetched here, while tode still owns the tty: the narrated
-  // download must not interleave with a pane that has taken over the screen.
-  // Installed already (every open but the first), this is one existsSync.
   await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
   const { palette } = await readPalette();
   ensureFont();
@@ -274,10 +259,6 @@ async function openCommand(args: string[]): Promise<number> {
     installKeybindings();
     const server = await ensureServer();
     done("code-server");
-    // the url can carry one folder or one plain file; everything else the
-    // request asked for — gotos, extra files, a diff, a view — rides the
-    // one-shot marker, stamped last so its freshness window starts after
-    // any first-install download
     const startupFiles = files.filter((file) => file.line !== undefined || file.path !== target.file);
     if (review || startupFiles.length > 0 || pair.length > 0) {
       requestStartupOpen({
@@ -373,7 +354,6 @@ async function themeCommand(file?: string): Promise<number> {
   return 0;
 }
 
-/** The shape the preload sends and the main script writes down. */
 type PageTiming = import("./browser/ctx").PageTiming;
 
 const STAGES: [string, string][] = [
@@ -460,7 +440,6 @@ async function upgradeCommand(args: string[]): Promise<number> {
 
   switch (outcome.kind) {
     case "not-an-install":
-      // a checkout has no VERSION file, and overwriting one would throw away work
       fail(`${outcome.root} is a working tree, not an install — use git pull`);
     // eslint-disable-next-line no-fallthrough
     case "current":
@@ -470,8 +449,6 @@ async function upgradeCommand(args: string[]): Promise<number> {
       process.stdout.write(`tode ${outcome.build.version} is available (you have ${outcome.from})\n`);
       return 0;
     case "upgraded": {
-      // the old code-server is still serving the tree that just moved; the
-      // next open fetches whatever the new tree pins, before its pane spawns
       stopServer();
       process.stdout.write(`tode ${outcome.from} -> ${outcome.build.version}\n`);
       return 0;
@@ -489,9 +466,6 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  // commands are flags, and only in first position: every bare word is a
-  // path, so a typo'd command errors as an unknown option instead of quietly
-  // opening a buffer named after it — and a file really named "import" opens
   if (args[0] === "--shortcut-setup") {
     const rest = args.slice(1);
     const noBoot = takeBool(rest, "--no-boot");
