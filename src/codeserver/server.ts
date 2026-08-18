@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -98,19 +98,34 @@ export async function currentServer(): Promise<ServerState | null> {
   return up && proxied ? state : null;
 }
 
-function serverVersion(bin: string): string {
-  try {
-    return execFileSync(bin, ["--version"], { encoding: "utf8" }).split("\n")[0].trim();
-  } catch {
-    return "unknown";
-  }
+function serverVersion(bin: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(bin, ["--version"], { encoding: "utf8" }, (error, stdout) => {
+      resolve(error ? "unknown" : stdout.split("\n")[0].trim());
+    });
+  });
 }
 
-export async function ensureServer(): Promise<ServerState> {
+let booting: Promise<ServerState> | null = null;
+
+export function ensureServer(): Promise<ServerState> {
+  if (!booting) {
+    booting = startServer();
+    booting.catch(() => {
+      booting = null;
+    });
+  }
+  return booting;
+}
+
+async function startServer(): Promise<ServerState> {
   const existing = await currentServer();
   if (existing) return existing;
 
   const bin = await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
+  // asked now, awaited after the injector is up — the version is a detail for
+  // `tode daemon status`, not something the boot should stall on
+  const version = serverVersion(bin);
   const port = await freePort();
   fs.mkdirSync(LOGS_DIR, { recursive: true });
   const log = fs.openSync(path.join(LOGS_DIR, "code-server.log"), "a");
@@ -159,7 +174,7 @@ export async function ensureServer(): Promise<ServerState> {
     port,
     injectorPid: injector.pid,
     injectorPort: injector.port,
-    version: serverVersion(bin),
+    version: await version,
     startedAt: Date.now(),
   };
   writeState(state);

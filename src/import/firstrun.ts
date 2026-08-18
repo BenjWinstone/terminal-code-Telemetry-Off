@@ -8,6 +8,7 @@ import { runImport } from "./run";
 import { startImportPage } from "./web";
 import type { OnboardStage } from "../onboarding";
 import { readPalette } from "../profile";
+import type { TerminalPalette } from "../terminal/osc";
 import { DATA_DIR } from "../runtime/paths";
 
 const INTRO_MARKER = path.join(DATA_DIR, "import-intro");
@@ -21,6 +22,7 @@ function markShown(): void {
 
 export async function importFirstRunStage(
   next: () => Promise<string>,
+  knownPalette?: TerminalPalette,
 ): Promise<OnboardStage | null> {
   if (fs.existsSync(INTRO_MARKER)) return null;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
@@ -32,7 +34,7 @@ export async function importFirstRunStage(
     return null;
   }
 
-  const { palette } = await readPalette();
+  const palette = knownPalette ?? (await readPalette()).palette;
   const page = await startImportPage({
     palette,
     editors: editors.map((editor) => ({ name: editor.name, iconPng: editorIconPng(editor.name) })),

@@ -1,6 +1,7 @@
 import { importFirstRunStage } from "./import/firstrun";
 import type { Pane } from "./launch";
 import { shortcutsFirstRunStage } from "./shortcuts/wizard";
+import type { TerminalPalette } from "./terminal/osc";
 
 export interface OnboardStage {
   url: string;
@@ -10,15 +11,19 @@ export interface OnboardStage {
   shown(): void;
 }
 
-export async function runOnboarding(pane: Pane, finalize: () => Promise<string>): Promise<void> {
+export async function runOnboarding(
+  pane: Pane,
+  finalize: () => Promise<string>,
+  palette?: TerminalPalette,
+): Promise<void> {
   let shortcuts: OnboardStage | null | undefined;
   const shortcutsStage = async () => {
-    if (shortcuts === undefined) shortcuts = await shortcutsFirstRunStage(finalize);
+    if (shortcuts === undefined) shortcuts = await shortcutsFirstRunStage(finalize, palette);
     return shortcuts;
   };
   const afterImport = async () => (await shortcutsStage())?.url ?? finalize();
 
-  const importStage = await importFirstRunStage(afterImport);
+  const importStage = await importFirstRunStage(afterImport, palette);
   const first = importStage ?? (await shortcutsStage());
   if (!first) return;
 

@@ -286,8 +286,10 @@ async function openCommand(args: string[]): Promise<number> {
     return workbenchUrl(origin(server), target);
   })());
 
+  void ensureServer().catch(() => {});
+
   const pane = new Pane(runtime, { split, size, stages });
-  await runOnboarding(pane, finalize);
+  await runOnboarding(pane, finalize, palette);
   if (pane.owned()) return pane.exited();
 
   const url = await finalize();

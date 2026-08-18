@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { builtinKeybindings, installKeybindings, readPalette, removalMasked } from "../profile";
+import type { TerminalPalette } from "../terminal/osc";
 import { DATA_DIR } from "../runtime/paths";
 import { resolveRuntimeWithProgress } from "../runtime/release";
 import { extensionHolder, importedConflicts, importedHolder } from "./imported";
@@ -462,8 +463,9 @@ async function openManager(
   intro: boolean,
   next?: () => Promise<string | null>,
   continues = !!next,
+  knownPalette?: TerminalPalette,
 ) {
-  const { palette } = await readPalette();
+  const palette = knownPalette ?? (await readPalette()).palette;
   const session = managerSession(provider);
   const state = { confirmed: false, reloadedLive: false, navigated: false };
   const wrappedNext = next
@@ -552,6 +554,7 @@ function markIntroShown(): void {
 
 export async function shortcutsFirstRunStage(
   next: () => Promise<string>,
+  palette?: TerminalPalette,
 ): Promise<import("../onboarding").OnboardStage | null> {
   if (fs.existsSync(INTRO_MARKER)) return null;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
@@ -566,7 +569,7 @@ export async function shortcutsFirstRunStage(
   } catch {
     return null;
   }
-  const { manager } = await openManager(provider, true, next, true);
+  const { manager } = await openManager(provider, true, next, true, palette);
   return {
     url: `http://127.0.0.1:${manager.port}`,
     done: manager.done,
