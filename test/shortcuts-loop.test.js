@@ -79,6 +79,7 @@ test("closed loop: resolve everything, apply, rerun shows nothing", { timeout: 2
   process.env.XDG_CONFIG_HOME = path.join(home, "config");
 
   let wizard = freshRequire("../dist/shortcuts/wizard.js");
+  require("../dist/shortcuts/vscode-keymap.js").setKeymapPlatformForTest("mac");
   let ghostty = require("../dist/shortcuts/backends/ghostty.js");
   let store = require("../dist/shortcuts/store.js");
   let profile = require("../dist/profile.js");

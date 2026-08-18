@@ -21,9 +21,15 @@ export function canonicalChord(chord: string): string {
   const mods = new Set(parts.map((part) => (part === "meta" || part === "super" ? "cmd" : part)));
   return [...MODS.filter((mod) => mods.has(mod)), key].join("+");
 }
+let platformOverride: "mac" | "linux" | null = null;
+export function setKeymapPlatformForTest(platform: "mac" | "linux" | null): void {
+  platformOverride = platform;
+  cache = null;
+}
 
 function keymapAsset(): string | null {
-  const name = `vscode-${process.platform === "darwin" ? "mac" : "linux"}.json`;
+  const platform = platformOverride ?? (process.platform === "darwin" ? "mac" : "linux");
+  const name = `vscode-${platform}.json`;
   for (let dir = __dirname; ; dir = path.dirname(dir)) {
     const candidate = path.join(dir, "assets", "keymaps", name);
     if (fs.existsSync(candidate)) return candidate;

@@ -1214,6 +1214,7 @@ test("steps resynchronize: one binding decided anywhere shows everywhere", () =>
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    require("../dist/shortcuts/vscode-keymap.js").setKeymapPlatformForTest("mac");
     const conflict = (editorId, trigger, current, command) => ({
       editorId, trigger, current,
       editor: { means: command, command },
@@ -1309,6 +1310,7 @@ test("applied resolutions never come back: removals mask every holder source", (
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    require("../dist/shortcuts/vscode-keymap.js").setKeymapPlatformForTest("mac");
     const { USER_DIR } = require("../dist/profile.js");
     const { allConflicts } = require("../dist/shortcuts/backends/ghostty.js");
     const { makeEditorHolds } = require("../dist/shortcuts/holds.js");
