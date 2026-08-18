@@ -9,7 +9,7 @@ import { parseJsonc, readKey, setKeys } from "./jsonc";
 import { DATA_DIR } from "./runtime/paths";
 import { CLAIM_DECISION_ID, IMPORT_DECISION_ID, QUIT_CHORD, QUIT_COMMAND, claimBindings, fallbackBindings, hintBindings, loadDecisions, overrideBindings, quitBindings, quitWhen, decisionsStamp } from "./shortcuts/store";
 import { queryTerminal, withFallbacks } from "./terminal/osc";
-import type { TerminalPalette } from "./terminal/osc";
+import type { ParsedReplies, TerminalPalette } from "./terminal/osc";
 import { hex } from "./theme/color";
 import {
   THEME_NAME,
@@ -90,17 +90,37 @@ export function cachedPalette(): TerminalPalette | null {
   }
 }
 
-export async function readPalette(): Promise<{ palette: TerminalPalette; source: "terminal" | "cache" | "default" }> {
-  const asked = await queryTerminal();
+function completeAnswer(asked: ParsedReplies | null): boolean {
+  return !!asked?.background && !!asked.foreground && asked.ansi.every((slot) => slot !== null);
+}
+
+export function resolvePalette(
+  asked: ParsedReplies | null,
+  cached: TerminalPalette | null,
+): { palette: TerminalPalette; source: "terminal" | "cache" | "default" } {
+  if (completeAnswer(asked)) return { palette: withFallbacks(asked), source: "terminal" };
   if (asked?.background) {
-    const palette = withFallbacks(asked);
-    fs.mkdirSync(path.dirname(PALETTE_CACHE), { recursive: true });
-    fs.writeFileSync(PALETTE_CACHE, `${JSON.stringify(palette, null, 2)}\n`);
-    return { palette, source: "terminal" };
+    const base = cached ?? withFallbacks(null);
+    return {
+      palette: {
+        background: asked.background,
+        foreground: asked.foreground ?? base.foreground,
+        ansi: base.ansi.map((slot, at) => asked.ansi[at] ?? slot),
+      },
+      source: cached ? "cache" : "default",
+    };
   }
-  const cached = cachedPalette();
   if (cached) return { palette: cached, source: "cache" };
   return { palette: withFallbacks(null), source: "default" };
+}
+
+export async function readPalette(): Promise<{ palette: TerminalPalette; source: "terminal" | "cache" | "default" }> {
+  const resolved = resolvePalette(await queryTerminal(), cachedPalette());
+  if (resolved.source === "terminal") {
+    fs.mkdirSync(path.dirname(PALETTE_CACHE), { recursive: true });
+    fs.writeFileSync(PALETTE_CACHE, `${JSON.stringify(resolved.palette, null, 2)}\n`);
+  }
+  return resolved;
 }
 
 function writeIfChanged(file: string, contents: string): boolean {

@@ -584,3 +584,24 @@ test("skill emits SKILL.md frontmatter with every path resolved from the env", (
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("a partial palette answer keeps its slots but is never authoritative", () => {
+  const { resolvePalette } = require("../dist/profile.js");
+  const ansi = (base) => Array.from({ length: 16 }, (_, at) => [base + at, 0, 0]);
+  const full = { background: [1, 2, 3], foreground: [250, 250, 250], ansi: ansi(0) };
+  assert.equal(resolvePalette(full, null).source, "terminal", "a complete answer is the terminal's");
+
+  // the ssh shape: bg arrived, fg and 15 ansi slots ran out the clock
+  const cached = { background: [9, 9, 9], foreground: [200, 200, 200], ansi: ansi(100) };
+  const partial = { background: [1, 2, 3], foreground: null, ansi: [[7, 7, 7], ...new Array(15).fill(null)] };
+  const blended = resolvePalette(partial, cached);
+  assert.equal(blended.source, "cache", "a blend is never reported as the terminal's answer");
+  assert.deepEqual(blended.palette.background, [1, 2, 3], "the slot that really arrived wins");
+  assert.deepEqual(blended.palette.foreground, [200, 200, 200], "missing slots come from the cache");
+  assert.deepEqual(blended.palette.ansi[0], [7, 7, 7]);
+  assert.deepEqual(blended.palette.ansi[5], [105, 0, 0]);
+
+  assert.equal(resolvePalette(partial, null).source, "default", "no cache leaves only built-ins");
+  assert.equal(resolvePalette(null, cached).source, "cache");
+  assert.equal(resolvePalette(null, null).source, "default");
+});

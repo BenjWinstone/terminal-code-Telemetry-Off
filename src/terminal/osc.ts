@@ -52,7 +52,7 @@ function buildQuery(): string {
 
 const DONE = /\x1b\[\?[0-9;]*c/;
 
-export function queryTerminal(timeoutMs = 400): Promise<ParsedReplies | null> {
+export function queryTerminal(idleMs = 400, capMs = 2000): Promise<ParsedReplies | null> {
   return new Promise((resolve) => {
     if (!process.stdout.isTTY) return resolve(null);
     let fd: number;
@@ -67,7 +67,8 @@ export function queryTerminal(timeoutMs = 400): Promise<ParsedReplies | null> {
     const finish = (value: ParsedReplies | null) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      clearTimeout(idle);
+      clearTimeout(cap);
       try {
         input?.setRawMode(false);
       } catch {}
@@ -77,14 +78,18 @@ export function queryTerminal(timeoutMs = 400): Promise<ParsedReplies | null> {
       } catch {}
       resolve(value);
     };
-    const timer = setTimeout(() => finish(raw ? parseReplies(raw) : null), timeoutMs);
+    const settle = () => finish(raw ? parseReplies(raw) : null);
+    let idle = setTimeout(settle, idleMs);
+    const cap = setTimeout(settle, capMs);
     try {
       input = new tty.ReadStream(fd);
       if (!input.isTTY) return finish(null);
       input.setRawMode(true);
       input.on("data", (chunk: Buffer) => {
         raw += chunk.toString("utf8");
-        if (DONE.test(raw)) finish(parseReplies(raw));
+        if (DONE.test(raw)) return finish(parseReplies(raw));
+        clearTimeout(idle);
+        idle = setTimeout(settle, idleMs);
       });
       input.on("error", () => finish(null));
       fs.writeSync(fd, buildQuery());
