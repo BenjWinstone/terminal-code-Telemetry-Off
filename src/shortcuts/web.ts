@@ -35,16 +35,32 @@ export interface ManagerRow {
    * under its own key so it never collides with the tode-side decision */
   claimDecision?: Decision | null;
   decision: Decision | null;
+  /** other bindings seated in the duel as their own columns. A resting claim
+   * coexists on the row's own chord (informational until moved); a contested
+   * one holds a chord some decision moved onto, and counts immediately. */
+  claims?: {
+    chord: string;
+    command: string;
+    claimant: string;
+    describes: string;
+    when?: string;
+    resting?: boolean;
+    /** a staged decision about this claim from an earlier visit, so reloads
+     * pick up exactly where the session left off */
+    decided?: Decision | null;
+  }[];
 }
 
 export interface ManagerDeps {
   /** Every managed row, decided or not. The stepper walks them one per
    * screen; the confirm screen tables them all. */
   rows(): ManagerRow[];
-  /** What already holds a candidate chord, or null when it is free. When an
-   * extension holds it, `claim` describes the binding so the page can offer
-   * to unset or move it on the spot. */
-  taken(chord: string): {
+  /** What already holds a candidate chord, or null when it is free. `id` is
+   * the row asking and `command` the exact claim asking, when one is —
+   * another spelling of the asker's own binding is not a conflict with
+   * itself. When someone else holds it, `claim` describes the binding so the
+   * page can offer to unset or move it on the spot. */
+  taken(chord: string, id?: string, command?: string, side?: "terminal" | "editor"): {
     holder: string;
     claim?: { chord: string; command: string; claimant: string; describes: string; when?: string };
   } | null;
@@ -57,10 +73,18 @@ export interface ManagerDeps {
     kind: "terminal" | "import" | "claim",
     decision: Decision | null,
     side?: "claim" | "own",
+    claim?: { command: string; when?: string },
   ): void;
   /** Writes everything staged: the terminal's freed file, the decisions
    * store, keybindings.json. */
   confirm(): { note: string };
+  /** Where the page should navigate when it is done — the next onboarding
+   * screen, or the editor after a standalone apply. Absent (or resolving
+   * null), done just closes the pane. */
+  next?(): Promise<string | null>;
+  /** Whether a plain done leads onward (onboarding) or closes the pane —
+   * the page words its buttons accordingly. */
+  continues?: boolean;
   reloadHint: string;
   terminalName: string;
   palette: TerminalPalette;
@@ -87,6 +111,7 @@ function managerState(deps: ManagerDeps) {
     terminalName: deps.terminalName,
     reloadHint: deps.reloadHint,
     intro: deps.intro === true,
+    continues: deps.continues === true,
     logos: { terminal: logoDataUri(deps.terminalName.toLowerCase()), editor: logoDataUri("tode") },
   };
 }
@@ -127,12 +152,23 @@ export function startManager(
       if (request.url === "/taken") {
         const chord = deps.normalize(String(sent.chord ?? ""));
         if (!chord) return ok({ ok: false, warning: `${sent.chord} does not parse as a chord` });
-        const info = chord === sent.id ? null : deps.taken(chord);
+        const info =
+          chord === sent.id
+            ? null
+            : deps.taken(
+                chord,
+                String(sent.id ?? ""),
+                sent.command ? String(sent.command) : undefined,
+                sent.side === "terminal" || sent.side === "editor" ? sent.side : undefined,
+              );
         if (info) {
+          // the canonical spelling rides along even on the claim path, so the
+          // page never stages a raw typed spelling that matches nothing
           return ok({
             ok: false,
             warning: `${chord} is already bound to ${info.holder}`,
             claim: info.claim ?? null,
+            chord,
           });
         }
         return ok({ ok: true, chord });
@@ -155,6 +191,7 @@ export function startManager(
           sent.kind === "claim" ? "claim" : sent.kind === "import" ? "import" : "terminal",
           decision,
           sent.side === "claim" ? "claim" : "own",
+          sent.action ? { command: String(sent.action), when: sent.guard ? String(sent.guard) : undefined } : undefined,
         );
         return ok({ ok: true, rows: deps.rows() });
       }
@@ -163,7 +200,8 @@ export function startManager(
         return ok({ ok: true, note: confirmed.note });
       }
       if (request.url === "/done") {
-        ok({ ok: true });
+        const next = deps.next ? await deps.next() : null;
+        ok({ ok: true, next });
         finish();
         return;
       }

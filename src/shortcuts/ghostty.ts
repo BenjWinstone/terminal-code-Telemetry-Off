@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { foreignBindings, todeKeybindings } from "../profile";
+import { foreignBindings, holdsStamp, todeKeybindings, removalMasked } from "../profile";
 import type { Binding } from "../profile";
-import { extensionHolder } from "./imported";
-import type { FreedMove, ProviderConflict, ShortcutProvider } from "./provider";
-import { loadDecisions } from "./store";
+import { extensionClaims } from "./imported";
+import type { EditorHold, FreedMove, ProviderConflict, ShortcutProvider } from "./provider";
+import { claimBindings, loadDecisions, overrideBindings } from "./store";
 import { canonicalChord, defaultBinding } from "./vscode-keymap";
 import { words } from "./words";
 
@@ -71,19 +71,77 @@ export function effectiveKeybinds(binary: string): Map<string, string> {
 
 let effectiveCache: Map<string, string> | null = null;
 
+/** Test seam: replaces the `ghostty +list-keybinds` call so the whole
+ * provider — scan, caches, freed-file writes — runs against a synthetic
+ * config. Null restores the real binary. */
+let listKeybindsSource: (() => string) | null = null;
+export function setListKeybindsForTest(source: (() => string) | null): void {
+  listKeybindsSource = source;
+  effectiveCache = null;
+  scanCache = null;
+}
+
 function effective(): Map<string, string> {
-  effectiveCache ??= effectiveKeybinds(ghosttyBinary()!);
+  effectiveCache ??= listKeybindsSource
+    ? parseKeybinds(listKeybindsSource())
+    : effectiveKeybinds(ghosttyBinary()!);
   return effectiveCache;
 }
 
-/** Editor chord syntax to ghostty trigger syntax: cmd is super, arrows are
- * spelled out, everything else matches. */
+/** Ghostty documents every keybind action itself (+list-actions --docs), so
+ * the wizard's descriptions are derived from the binary the user runs — the
+ * first sentence of each action's docs, never a hand-written table. */
+export function parseActionDocs(output: string): Map<string, string> {
+  const docs = new Map<string, string>();
+  let action: string | null = null;
+  let lines: string[] = [];
+  const flush = () => {
+    if (!action || lines.length === 0) return;
+    const text = lines.join(" ");
+    const sentence = /^(.+?)\.(?:\s|$)/.exec(text)?.[1] ?? text;
+    docs.set(action, sentence);
+  };
+  for (const line of output.split("\n")) {
+    const head = /^([a-z0-9_]+):\s*$/.exec(line);
+    if (head) {
+      flush();
+      action = head[1];
+      lines = [];
+      continue;
+    }
+    if (action && /^\s+\S/.test(line)) lines.push(line.trim());
+  }
+  flush();
+  return docs;
+}
+
+let docsCache: Map<string, string> | null = null;
+
+function actionDocs(): Map<string, string> {
+  if (docsCache) return docsCache;
+  try {
+    docsCache = parseActionDocs(
+      execFileSync(ghosttyBinary()!, ["+list-actions", "--docs"], { encoding: "utf8" }),
+    );
+  } catch {
+    docsCache = new Map();
+  }
+  return docsCache;
+}
+
+/** Editor chord syntax to ghostty trigger syntax: cmd is super, arrows,
+ * paging and the backtick are spelled out, everything else matches. This must
+ * invert every spelling fromTrigger produces, or a move targeting such a
+ * chord writes a key name ghostty cannot parse and silently never lands. */
 export function toTrigger(chord: string): string {
   return chord
     .split("+")
     .map((part) => {
       if (part === "cmd") return "super";
       if (["left", "right", "up", "down"].includes(part)) return `arrow_${part}`;
+      if (part === "pageup") return "page_up";
+      if (part === "pagedown") return "page_down";
+      if (part === "`") return "grave_accent";
       return part;
     })
     .join("+");
@@ -134,7 +192,7 @@ export function fromTrigger(trigger: string): string | null {
   return canonicalChord(parts.join("+"));
 }
 
-const HEADER = "# written by tode shortcuts — frees the chords the editor needs from ghostty\n";
+const HEADER = "# written by tode shortcut-setup — frees the chords the editor needs from ghostty\n";
 export const INCLUDE_LINE = "config-file = ?tode/keybinds.ghostty";
 const KEYBINDS_FILE = ["tode", "keybinds.ghostty"];
 
@@ -220,21 +278,47 @@ export function removeFreed(configDir: string): boolean {
  * hit means a terminal bind on the chord takes something from the editor.
  * Built as a closure so one scan pass reads keybindings.json and the decision
  * store once, not once per live terminal bind. */
-export function makeEditorHolds(): (chord: string) => { command: string; guard?: string } | null {
-  const own = new Map<string, { command: string; guard?: string }>();
-  for (const binding of [...foreignBindings(), ...(todeKeybindings() as Binding[])]) {
-    if (!binding.key || !binding.command || binding.command.startsWith("-")) continue;
+export function makeEditorHolds(): (chord: string) => EditorHold[] {
+  const own = new Map<string, EditorHold[]>();
+  const record = (binding: Binding, claimant: string) => {
+    if (!binding.key || !binding.command || binding.command.startsWith("-")) return;
+    // a removal entry written later kills this rule the same way vscode does
+    if (removalMasked(binding.key, binding.command)) return;
     const chord = canonicalChord(binding.key);
-    if (!own.has(chord)) own.set(chord, { command: binding.command, guard: binding.when });
-  }
+    const list = own.get(chord) ?? [];
+    list.push({ command: binding.command, guard: binding.when, claimant });
+    own.set(chord, list);
+  };
+  for (const binding of foreignBindings()) record(binding, "imported");
+  for (const binding of todeKeybindings() as Binding[]) record(binding, "terminal-code");
+  // the wizard's own written bindings — moved editor sides and remapped
+  // claims — hold their chords like anything else the file carries; leaving
+  // them out would let a future terminal bind land on them silently
+  for (const binding of overrideBindings()) record(binding, "terminal-code");
+  for (const binding of claimBindings()) record(binding, "terminal-code");
   return (chord) => {
-    const mine = own.get(canonicalChord(chord));
-    if (mine) return mine;
-    const contributed = extensionHolder(chord);
-    if (contributed) return { command: contributed.command, guard: contributed.when };
+    const held: EditorHold[] = [...(own.get(canonicalChord(chord)) ?? [])];
+    for (const claim of extensionClaims(chord)) {
+      held.push({
+        command: claim.command,
+        guard: claim.when,
+        claimant: claim.claimant,
+        describes: claim.describes,
+      });
+    }
     const fallback = defaultBinding(chord);
-    if (fallback) return { command: fallback.command, guard: fallback.when };
-    return null;
+    if (fallback && !removalMasked(chord, fallback.command)) {
+      held.push({ command: fallback.command, guard: fallback.when, claimant: "terminal-code" });
+    }
+    // one entry per command, higher-precedence spelling first — then the
+    // unguarded holds lead: an always-on binding is the chord's real owner,
+    // a guarded one only owns its own context, so it trails as one more
+    // column rather than fronting the row
+    const seen = new Set<string>();
+    const unique = held.filter((hold) =>
+      seen.has(hold.command) ? false : (seen.add(hold.command), true),
+    );
+    return [...unique.filter((hold) => !hold.guard), ...unique.filter((hold) => !!hold.guard)];
   };
 }
 
@@ -293,9 +377,20 @@ export function emitSequence(chord: string): string | null {
 }
 
 /** What a freed trigger used to run. The live keybind table no longer knows —
- * the free unbound it — but the decision that freed it kept the action. */
+ * the free unbound it — but the decision that freed it kept the action,
+ * whether it was recorded from the row itself or from a claimant column in
+ * another row's duel. */
 function decidedAction(chord: string): string | null {
-  return loadDecisions()?.choices[chord]?.action ?? null;
+  const choices = loadDecisions()?.choices ?? {};
+  const direct = choices[chord]?.action;
+  if (direct) return direct;
+  for (const [id, decision] of Object.entries(choices)) {
+    const owns = id === `claim:${chord}` || id.startsWith(`claim:${chord}:`);
+    if (owns && decision.owner === "terminal" && decision.action) {
+      return decision.action;
+    }
+  }
+  return null;
 }
 
 /** Every conflict this terminal presents, derived live: any bind that always
@@ -305,8 +400,9 @@ function decidedAction(chord: string): string | null {
 export function allConflicts(
   effective: Map<string, string>,
   freed: Set<string>,
-  holds: (chord: string) => { command: string; guard?: string } | null = makeEditorHolds(),
+  holds: (chord: string) => EditorHold[] = makeEditorHolds(),
   past: (chord: string) => string | null = decidedAction,
+  docs: Map<string, string> = actionDocs(),
 ): ProviderConflict[] {
   const seen = new Set<string>();
   const conflicts: ProviderConflict[] = [];
@@ -328,26 +424,34 @@ export function allConflicts(
       return;
     }
     const held = holds(chord);
-    if (!held) return;
+    if (held.length === 0) return;
+    const [primary, ...others] = held;
     seen.add(chord);
     // action is null for a trigger tode already freed; the decision that
     // freed it remembers what it ran, so the texts can still name it
     const ran = action ?? past(chord);
     const doing = ran ? words(ran) : "what it ran before";
+    // ghostty's own docs for the action, when the binary offers them; the
+    // cleaned identifier is only the fallback
+    const described = ran ? (docs.get(ran.split(":")[0]) ?? doing) : doing;
     conflicts.push({
       editorId: chord,
       trigger,
-      current: action,
+      // the binding's identity: what the trigger runs, or ran before a free —
+      // the mirror between a row and the claim records about it needs the
+      // action even after the free landed
+      current: ran,
       editor: {
-        means: words(held.command),
-        command: held.command,
+        means: primary.describes ?? words(primary.command),
+        command: primary.command,
         // the label above is generated from the command id; the id and the
         // source binding's own guard are the real metadata, shown small
         // under the label
-        guard: held.guard,
+        guard: primary.guard,
       },
-      short: doing,
-      inTerminal: `runs ${doing} in Ghostty, so ${words(held.command)} never reaches the editor`,
+      others,
+      short: described,
+      inTerminal: `runs ${doing} in Ghostty, so ${primary.describes ?? words(primary.command)} never reaches the editor`,
       freed: `${doing} goes`,
       tradeoff: `Ghostty's ${doing} stops working`,
     });
@@ -412,7 +516,7 @@ export function reloadGhostty(
  * callback, the fresh steps, the confirm table — and nothing it stages changes
  * what the terminal holds, so one result serves until apply or undo rewrites
  * the config. */
-let scanCache: ProviderConflict[] | null = null;
+let scanCache: { stamp: string; conflicts: ProviderConflict[] } | null = null;
 
 export const ghosttyProvider: ShortcutProvider = {
   id: "ghostty",
@@ -422,14 +526,33 @@ export const ghosttyProvider: ShortcutProvider = {
     return ghosttyBinary() ? null : "the ghostty cli is not on PATH, so its keybinds cannot be read";
   },
   scan(): ProviderConflict[] {
-    scanCache ??= allConflicts(effective(), freedTriggers(ghosttyConfigDir()));
-    return scanCache;
+    // keyed on every holds input, so an import or a boot that lands new
+    // keybindings mid-session refreshes the scan instead of hiding conflicts
+    const stamp = holdsStamp();
+    if (scanCache?.stamp !== stamp) {
+      scanCache = { stamp, conflicts: allConflicts(effective(), freedTriggers(ghosttyConfigDir())) };
+    }
+    return scanCache.conflicts;
   },
   takenAs(chord: string): string | null {
-    const action = effective().get(toTrigger(chord));
-    return action === undefined || action === "unbind" || action === "ignore" ? null : action;
+    // the same normalization the conflict scan applies: prefixed triggers
+    // (global:, physical:) still hold their chord, pass-through and harmless
+    // binds do not — vetting and scan must agree on what "held" means
+    for (const [raw, action] of effective()) {
+      const { trigger, passesThrough } = parseTrigger(raw);
+      if (passesThrough) continue;
+      if (action === "unbind" || action === "ignore" || HARMLESS_ACTION.test(action)) continue;
+      if (fromTrigger(trigger) === chord) return action;
+    }
+    return null;
+  },
+  trigger: toTrigger,
+  describe(action: string): string {
+    return actionDocs().get(action.split(":")[0]) ?? words(action);
   },
   apply(moves: FreedMove[]): string {
+    // the freed file changes what is effectively bound — both caches restart
+    effectiveCache = null;
     scanCache = null;
     return writeFreed(ghosttyConfigDir(), withEmits(moves));
   },
@@ -437,6 +560,7 @@ export const ghosttyProvider: ShortcutProvider = {
     return reloadGhostty();
   },
   undo(): boolean {
+    effectiveCache = null;
     scanCache = null;
     return removeFreed(ghosttyConfigDir());
   },

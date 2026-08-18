@@ -3,8 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { holdsStamp } from "../profile";
 import { makeEditorHolds } from "./ghostty";
-import type { FreedMove, ProviderConflict, ShortcutProvider } from "./provider";
+import type { EditorHold, FreedMove, ProviderConflict, ShortcutProvider } from "./provider";
 import { loadDecisions } from "./store";
 import { canonicalChord } from "./vscode-keymap";
 import { words } from "./words";
@@ -172,7 +173,7 @@ export function fromTrigger(trigger: string): string | null {
   return canonicalChord(parts.join("+"));
 }
 
-const HEADER = "# written by tode shortcuts — frees the chords the editor needs from kitty\n";
+const HEADER = "# written by tode shortcut-setup — frees the chords the editor needs from kitty\n";
 export const INCLUDE_LINE = "include tode/keybinds.kitty.conf";
 const KEYBINDS_FILE = ["tode", "keybinds.kitty.conf"];
 
@@ -323,7 +324,7 @@ function lowerFirst(text: string): string {
 export function allConflicts(
   { binds, docs }: KittyKeymap,
   freed: Set<string>,
-  holds: (chord: string) => { command: string; guard?: string } | null = makeEditorHolds(),
+  holds: (chord: string) => EditorHold[] = makeEditorHolds(),
   past: (chord: string) => string | null = decidedAction,
 ): ProviderConflict[] {
   const seen = new Set<string>();
@@ -333,7 +334,8 @@ export function allConflicts(
     const chord = fromTrigger(trigger);
     if (!chord || seen.has(chord)) return;
     const held = holds(chord);
-    if (!held) return;
+    if (held.length === 0) return;
+    const [primary, ...others] = held;
     seen.add(chord);
     // bind is null for a trigger tode already freed; the decision that freed
     // it remembers what it ran, so the texts can still name it
@@ -344,10 +346,13 @@ export function allConflicts(
         ? `${bind.sequences.length} key sequences`
         : "what it ran before";
     const doc = ran ? docs[ran.split(/\s+/)[0]] : undefined;
+    // the binding's identity: what the trigger runs, or ran before a free —
+    // the mirror between a row and the claim records about it needs the
+    // action even after the free landed
     const current = bind
       ? (bind.action ?? `${SEQUENCE_MARKER} (${bind.sequences.map((s) => s.keys).join(", ")})`)
-      : null;
-    const means = words(held.command);
+      : ran;
+    const means = primary.describes ?? words(primary.command);
     // a compatible rebind sticks to the row whether the free is still pending
     // (action from the live bind) or already applied (kept by the decision)
     const rebind = ran ? SHARED_REBINDS[ran.split(/\s+/)[0]] : undefined;
@@ -355,7 +360,8 @@ export function allConflicts(
       editorId: chord,
       trigger,
       current,
-      editor: { means, command: held.command, guard: held.guard },
+      editor: { means, command: primary.command, guard: primary.guard },
+      others,
       short: doing,
       inTerminal: `runs ${doing} in kitty${doc ? ` (${lowerFirst(doc)})` : ""}, so ${means} never reaches the editor`,
       freed: rebind ? `${doing} stays whenever kitty can act` : `${doing} goes`,
@@ -433,7 +439,7 @@ export function reloadKitty(
 
 /** One scan serves each interaction, like ghostty's — nothing the manager
  * stages changes what the terminal holds until apply or undo rewrites disk. */
-let scanCache: ProviderConflict[] | null = null;
+let scanCache: { stamp: string; conflicts: ProviderConflict[] } | null = null;
 
 export const kittyProvider: ShortcutProvider = {
   id: "kitty",
@@ -443,8 +449,13 @@ export const kittyProvider: ShortcutProvider = {
     return kittyBinary() ? null : "the kitty cli is not on PATH, so its keymap cannot be read";
   },
   scan(): ProviderConflict[] {
-    scanCache ??= allConflicts(keymap(), freedTriggers(kittyConfigDir()));
-    return scanCache;
+    // keyed on every holds input, so an import or a boot that lands new
+    // keybindings mid-session refreshes the scan instead of hiding conflicts
+    const stamp = holdsStamp();
+    if (scanCache?.stamp !== stamp) {
+      scanCache = { stamp, conflicts: allConflicts(keymap(), freedTriggers(kittyConfigDir())) };
+    }
+    return scanCache.conflicts;
   },
   takenAs(chord: string): string | null {
     const wanted = canonicalChord(chord);
@@ -452,6 +463,8 @@ export const kittyProvider: ShortcutProvider = {
     if (!bind || freedTriggers(kittyConfigDir()).has(bind.trigger)) return null;
     return bind.action ?? SEQUENCE_MARKER;
   },
+  trigger: toTrigger,
+  describe: actionLabel,
   apply(moves: FreedMove[]): string {
     scanCache = null;
     keymapCache = null;

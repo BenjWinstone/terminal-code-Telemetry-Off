@@ -4,7 +4,7 @@ import type { TerminalPalette } from "../terminal/osc";
 import { contrast, fromOklch, hex, isDark, legible, mix, shade, toOklch, withAlpha } from "./color";
 import type { Rgb } from "./color";
 
-export const THEME_NAME = "Tode Terminal";
+export const THEME_NAME = "Terminal Code";
 
 /** Which ansi slot best represents a hue, judged by angle rather than by index,
  * because plenty of terminal themes do not put red in slot one. */

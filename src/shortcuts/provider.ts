@@ -1,6 +1,15 @@
 import { ghosttyProvider } from "./ghostty";
 import { kittyProvider } from "./kitty";
 
+/** One binding the editor side holds on a chord: who binds it, what it runs,
+ * and the context it declared for itself. */
+export interface EditorHold {
+  command: string;
+  guard?: string;
+  claimant?: string;
+  describes?: string;
+}
+
 /** One chord this terminal stands in front of. `current` is what the terminal
  * does with it right now, or null when tode already freed it — freed chords
  * stay visible so a re-run of the wizard can hand them back. */
@@ -10,7 +19,8 @@ export interface ProviderConflict {
   trigger: string;
   current: string | null;
   /** The editor's side of the conflict, derived from the live terminal binds
-   * intersected with what the workbench actually binds. */
+   * intersected with what the workbench actually binds. The lead holder — the
+   * chord's most general owner — fronts the row. */
   editor: {
     means: string;
     command: string;
@@ -18,6 +28,10 @@ export interface ProviderConflict {
      * metadata for the page, alongside the command id itself. */
     guard?: string;
   };
+  /** Every other binding sitting on the same chord — a guarded extension
+   * contribution, another imported entry — each seated in the duel as its own
+   * column, because losing the chord loses all of them. */
+  others: EditorHold[];
   inTerminal: string;
   /** The same as inTerminal but as a two-or-three word verb phrase, short
    * enough to sit inside a one-line option label. */
@@ -61,9 +75,16 @@ export interface ShortcutProvider {
   ready(): string | null;
   scan(): ProviderConflict[];
   /** What this terminal currently does with an editor-syntax chord ("ctrl+shift+w"),
-   * or null when it lets it through. The wizard uses this to vouch for a suggested
-   * chord and to warn when a typed one is already taken. */
+   * or null when it lets it through. The wizard uses this to vouch for a
+   * chord — and when a typed one is taken, the holder joins the duel as a
+   * claimant the user can unset or move. */
   takenAs(chord: string): string | null;
+  /** This terminal's spelling of an editor-syntax chord, so a claim on a
+   * chord the scan never listed can still become a move. */
+  trigger(chord: string): string;
+  /** A human description of one of this terminal's actions, from the
+   * terminal's own docs when it ships them. */
+  describe(action: string): string;
   /** Makes `moves` exactly the set tode frees or moves — an empty list undoes everything. */
   apply(moves: FreedMove[]): string;
   /** Called once the apply (or undo) has landed on disk. Returns true when

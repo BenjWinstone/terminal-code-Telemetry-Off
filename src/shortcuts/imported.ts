@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { EXTENSIONS_DIR, builtinKeybindings, foreignBindings } from "../profile";
+import { EXTENSIONS_DIR, builtinKeybindings, foreignBindings, removalMasked } from "../profile";
 
 /** Chord equality the way vscode reads keys: modifier order and case do not
  * matter. */
@@ -25,7 +25,8 @@ export function importedHolder(chord: string): string | null {
       !!entry.key &&
       !!entry.command &&
       !entry.command.startsWith("-") &&
-      sameChord(entry.key, chord),
+      sameChord(entry.key, chord) &&
+      !removalMasked(entry.key, entry.command),
   );
   return found?.command ?? null;
 }
@@ -46,9 +47,10 @@ export interface ImportedConflict {
  * chords, all of them the same way. User keybindings outrank extension
  * keybindings in vscode, and both are written above tode's, so a claim here
  * silently wins over the builtin; the wizard surfaces each one next to the
- * terminal's conflicts. A guarded extension claim is already split
- * structurally — the builtin yields inside the claim's own when clause (see
- * store.carvedWhen) — so only unguarded claims still need a decision. */
+ * terminal's conflicts. An extension claim is already split structurally when
+ * the builtin's own guard carves the claim's context out (store.carvedWhen);
+ * every other claim — unguarded, or on a chord that never yields, like quit —
+ * still needs a decision. */
 export function importedConflicts(): ImportedConflict[] {
   const out: ImportedConflict[] = [];
   const seen = new Set<string>();
@@ -60,8 +62,12 @@ export function importedConflicts(): ImportedConflict[] {
       out.push({ key: bind.key, builtin: bind.command, command, claimant: "imported" });
       continue;
     }
-    const held = extensionClaims(bind.key).find((claim) => !claim.when);
-    if (held && held.command !== bind.command) {
+    const carved = (claim: ExtensionClaim) =>
+      !!claim.when && (bind.when ?? "").includes(`!(${claim.when})`);
+    const held = extensionClaims(bind.key).find(
+      (claim) => claim.command !== bind.command && !carved(claim),
+    );
+    if (held) {
       out.push({ key: bind.key, builtin: bind.command, ...held });
     }
   }
@@ -97,16 +103,22 @@ type ContributedBinding = ExtensionClaim & { key: string };
  * per chord — sometimes ninety times in one pass — so the walk is cached and
  * keyed on extensions.json's mtime: an install or removal rewrites that file,
  * anything else leaves the cache warm. */
-let contributedCache: { stamp: number; bindings: ContributedBinding[] } | null = null;
+let contributedCache: { stamp: string; bindings: ContributedBinding[] } | null = null;
 
 function contributedKeybindings(): ContributedBinding[] {
   const manifest = path.join(EXTENSIONS_DIR, "extensions.json");
-  let stamp: number;
-  try {
-    stamp = fs.statSync(manifest).mtimeMs;
-  } catch {
-    return [];
-  }
+  const mtime = (file: string) => {
+    try {
+      return fs.statSync(file).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  // the registry file alone is not enough: an import copies extension
+  // directories before the editor's first boot registers them, and their
+  // keybindings must count from the moment they are on disk — otherwise the
+  // wizard resolves against a smaller world than the next scan sees
+  const stamp = `${mtime(manifest)}:${mtime(EXTENSIONS_DIR)}`;
   if (contributedCache && contributedCache.stamp === stamp) return contributedCache.bindings;
 
   const bindings: ContributedBinding[] = [];
@@ -118,11 +130,19 @@ function contributedKeybindings(): ContributedBinding[] {
   try {
     listed = JSON.parse(fs.readFileSync(manifest, "utf8"));
   } catch {}
+  const dirs = new Set<string>();
   for (const entry of listed) {
     const dir = entry.relativeLocation
       ? path.join(EXTENSIONS_DIR, entry.relativeLocation)
       : entry.location?.path;
-    if (!dir) continue;
+    if (dir) dirs.add(dir);
+  }
+  try {
+    for (const entry of fs.readdirSync(EXTENSIONS_DIR, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.add(path.join(EXTENSIONS_DIR, entry.name));
+    }
+  } catch {}
+  for (const dir of dirs) {
     let pkg: {
       name?: string;
       displayName?: string;
@@ -157,6 +177,7 @@ function contributedKeybindings(): ContributedBinding[] {
 export function extensionClaims(chord: string): ExtensionClaim[] {
   return contributedKeybindings()
     .filter((bind) => sameChord(bind.key, chord))
+    .filter((bind) => !removalMasked(chord, bind.command))
     .map(({ key: _key, ...claim }) => claim);
 }
 

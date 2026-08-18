@@ -21,6 +21,8 @@ main {
 kbd {
   border: 1px solid var(--line); border-bottom-width: 2px;
   padding: 0 .35ch; font: inherit;
+  /* a chord is one unit: "tode shortcuts" split across lines reads as two */
+  white-space: nowrap;
 }
 .intro { text-align: left; max-width: 34rem; width: 100%; }
 .introlead { color: var(--fg); }

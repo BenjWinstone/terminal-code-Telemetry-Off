@@ -14,9 +14,9 @@ import {
 } from "./codeserver/server";
 import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetch } from "./codeserver/vendored";
 import { installBridge, requestStartupView } from "./bridge";
-import { BOOT_AFTER_APPLY, autoApplyShared, firstRunShortcuts, shortcutsCommand } from "./shortcuts/wizard";
+import { BOOT_AFTER_APPLY, autoApplyShared, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
-import { firstRunImport } from "./import/firstrun";
+import { runOnboarding } from "./onboarding";
 import { parseGoto, runningWindow, sendToWindow } from "./ipc";
 import type { OpenFile } from "./ipc";
 import { EXTENSIONS_DIR, VSCODE_DIR, registerThemeExtension } from "./profile";
@@ -31,10 +31,11 @@ import {
   installTheme,
   readPalette,
 } from "./profile";
-import { launchBrowser } from "./launch";
+import { Pane, launchBrowser } from "./launch";
 import { PINNED_VERSION, resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
 import { BROWSER_HOME } from "./runtime/paths";
 import { resolveTarget, workbenchUrl } from "./target";
+import { uninstallCommand } from "./uninstall";
 import { upgrade } from "./upgrade";
 import { hex } from "./theme/color";
 import { generateTheme, semanticColors } from "./theme/generate";
@@ -51,6 +52,22 @@ function todeCommand(): string[] {
   const shim = shimPath();
   if (fs.existsSync(shim)) return [shim];
   return [process.execPath, process.argv[1]];
+}
+
+/** The editor url for a boot that starts outside openCommand: the standalone
+ * wizard's apply navigates its own pane here, instead of closing it and
+ * respawning — which would flash the terminal through its primary buffer. */
+async function bootEditorUrl(): Promise<string> {
+  const { palette } = await readPalette();
+  ensureFont();
+  installTheme(palette);
+  installCss(palette);
+  installSettings();
+  setLiveTheme(generateTheme(palette));
+  installBridge(todeCommand());
+  installKeybindings();
+  const server = await ensureServer();
+  return workbenchUrl(origin(server), resolveTarget(undefined, process.cwd()));
 }
 
 function fail(message: string): never {
@@ -127,10 +144,10 @@ Options:
   --review              Open on the source control panel
 
 Commands:
-  shortcuts             Decide, chord by chord, whether this terminal or the
+  shortcut-setup        Decide, chord by chord, whether this terminal or the
                         editor gets each contested shortcut (--undo)
   timing                Where the last page load spent its time
-  quit                  Close the tode panes, leaving code-server warm
+  quit                  Close the terminal-code panes, leaving code-server warm
   import [editor]       Bring settings, keybindings, snippets and extensions
                         over from vscode or a fork of it
   theme [file]          Show the colours this terminal reports, and rebuild;
@@ -140,6 +157,8 @@ Commands:
   daemon status|stop    The code-server that stays warm between opens
   upgrade [--check]     Install the newest build on this channel
   shutdown              Stop everything tode is running
+  uninstall [--yes]     Remove terminal-code entirely: the app, its profile and data,
+                        and the shortcut overrides in your terminal config
 `;
 
 
@@ -272,26 +291,39 @@ async function openCommand(args: string[]): Promise<number> {
   // once, before the first editor ever shows: the other editor's setup comes
   // over first (imported keybindings feed the shortcut scan), then contested
   // chords get resolved while the cost of a wrong one is still zero
-  await firstRunImport();
   // every boot, not just the first: a terminal update can add new binds with
   // a costless compatible rebind, and those are settled silently
   autoApplyShared();
-  await firstRunShortcuts();
-  // after the wizard on purpose: the bridge bakes the quit hint and the
-  // keybindings read the decisions, so both have to see what was just chosen
-  installBridge(todeCommand());
-  installKeybindings();
-  const server = await ensureServer();
-  done("code-server");
 
+  // finalized once, by whichever screen reaches the editor first. The bridge
+  // and keybindings land after the wizard on purpose: the bridge bakes the
+  // quit hint and the keybindings read the decisions, so both have to see
+  // what was just chosen.
+  let finalized: Promise<string> | null = null;
+  const finalize = () =>
+    (finalized ??= (async () => {
+      installBridge(todeCommand());
+      installKeybindings();
+      const server = await ensureServer();
+      done("code-server");
+      // stamped last: the bridge discards markers older than two minutes, and
+      // on a fresh install the wizard and the code-server download can spend
+      // all of that
+      if (review) requestStartupView("scm");
+      return workbenchUrl(origin(server), target);
+    })());
+
+  // the first-run screens share one pane with the editor: each screen
+  // navigates to the next, and the last navigation is the workbench itself —
+  // the terminal never drops back to its primary buffer between them
+  const pane = new Pane(runtime, { split, size, stages });
+  await runOnboarding(pane, finalize);
+  if (pane.owned()) return pane.exited();
+
+  const url = await finalize();
   if (timing) {
     for (const [label, ms] of stages) process.stderr.write(`  ${label.padEnd(12)} ${ms}ms\n`);
   }
-
-  // stamped last: the bridge discards markers older than two minutes, and on a
-  // fresh install the wizard and the code-server download can spend all of that
-  if (review) requestStartupView("scm");
-  const url = workbenchUrl(origin(server), target);
   return launchBrowser(runtime, url, palette, { split, size, stages }).catch((error: Error) =>
     fail(error.message),
   );
@@ -556,12 +588,12 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args[0] === "shortcuts") {
+  if (args[0] === "shortcut-setup") {
     const rest = args.slice(1);
     // a script running the wizard would block on the editor booting over the
     // script's own cwd — --no-boot lets it apply and return
     const noBoot = takeBool(rest, "--no-boot");
-    const code = await shortcutsCommand(rest);
+    const code = await shortcutsCommand(rest, noBoot ? undefined : bootEditorUrl);
     if (code === BOOT_AFTER_APPLY) return noBoot ? 0 : openCommand([]);
     return code;
   }
@@ -574,6 +606,7 @@ async function main(): Promise<number> {
   if (args[0] === "quit") return quitCommand();
   if (args[0] === "upgrade") return upgradeCommand(args.slice(1));
   if (args[0] === "shutdown") return shutdownCommand();
+  if (args[0] === "uninstall") return uninstallCommand(args.slice(1));
   return openCommand(args);
 }
 

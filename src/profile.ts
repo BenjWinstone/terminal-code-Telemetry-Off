@@ -7,7 +7,7 @@ import { CSS_FILE } from "./codeserver/server";
 import { FONT_FALLBACKS, injectedCss } from "./codeserver/inject";
 import { parseJsonc, readKey, setKeys } from "./jsonc";
 import { DATA_DIR } from "./runtime/paths";
-import { QUIT_CHORD, QUIT_COMMAND, carvedWhen, claimBindings, fallbackBindings, hintBindings, overrideBindings, quitBindings, quitWhen } from "./shortcuts/store";
+import { CLAIM_DECISION_ID, IMPORT_DECISION_ID, QUIT_CHORD, QUIT_COMMAND, carvedWhen, claimBindings, fallbackBindings, hintBindings, loadDecisions, overrideBindings, quitBindings, quitWhen, decisionsStamp } from "./shortcuts/store";
 import { queryTerminal, withFallbacks } from "./terminal/osc";
 import type { TerminalPalette } from "./terminal/osc";
 import { hex } from "./theme/color";
@@ -67,7 +67,7 @@ export function assetPath(name: string): string {
  * font has to actually be installed before vscode can use it. */
 export const FONT_ASSET = FONT_FILE;
 
-function userFontsDir(): string {
+export function userFontsDir(): string {
   if (process.platform === "darwin") return path.join(os.homedir(), "Library", "Fonts");
   const dataHome =
     process.env.XDG_DATA_HOME && path.isAbsolute(process.env.XDG_DATA_HOME)
@@ -162,7 +162,7 @@ export function installThemeJson(
       // the name stays stable so publisher.name always matches the id the
       // registration claims (tode.tode-theme) — vscode validates that pair
       name: "tode-theme",
-      displayName: "tode terminal theme",
+      displayName: "terminal-code terminal theme",
       publisher: "tode",
       version: "1.0.0",
       engines: { vscode: "^1.80.0" },
@@ -392,7 +392,7 @@ export function builtinKeybindings(): Binding[] {
 /** The pane chords, then whatever the shortcut wizard decided belongs on the
  * editor side. There is deliberately no blanket cmd-to-ctrl transformation any
  * more: which chords need help differs per terminal and per user, and the
- * wizard (tode shortcuts) is where that gets decided, one chord at a time. */
+ * wizard (tode shortcut-setup) is where that gets decided, one chord at a time. */
 export function todeKeybindings(): unknown[] {
   return [
     ...PANE_CHORDS.map(([key, command]) => ({ key, command, when: carvedWhen(undefined, key) })),
@@ -428,6 +428,50 @@ function readBindings(file: string): Binding[] {
   }
 }
 
+/** One string that changes whenever any input of the editor-holds derivation
+ * changes: the user's keybindings, the extension registry, the extension
+ * tree, or the decision store. A conflict scan cached against this stamp can
+ * never go stale — the import step writing keybindings mid-onboarding, or the
+ * first boot registering extensions, invalidates it on the spot. */
+export function holdsStamp(): string {
+  const stamp = (file: string) => {
+    try {
+      return fs.statSync(file).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  return [
+    stamp(KEYBINDINGS_FILE),
+    stamp(KEYBINDINGS_RECORD),
+    stamp(path.join(EXTENSIONS_DIR, "extensions.json")),
+    stamp(EXTENSIONS_DIR),
+    decisionsStamp(),
+  ].join(":");
+}
+
+/** Whether a user-level removal entry (`-command`) masks this chord+command.
+ * vscode applies these vetoes when it reads keybindings.json — a removal
+ * written after a rule kills it, whether the rule came from the defaults, an
+ * extension, an import, or tode itself. Every holder scan must see through
+ * the same vetoes, or each conflict the wizard already resolved comes back
+ * as a brand-new one on the next run. Sourced from the file and from the
+ * decision store, so a saved-but-not-yet-installed decision masks the same
+ * way an installed one does. */
+export function removalMasked(chord: string, command: string): boolean {
+  const canon = (value: string) =>
+    value.toLowerCase().split("+").map((part) => part.trim()).sort().join("+");
+  const target = `${canon(chord)}:${command}`;
+  const negative = (entry: Binding) =>
+    !!entry.key &&
+    !!entry.command?.startsWith("-") &&
+    `${canon(entry.key)}:${entry.command.slice(1)}` === target;
+  return (
+    readBindings(KEYBINDINGS_FILE).some(negative) ||
+    [...overrideBindings(), ...claimBindings()].some(negative)
+  );
+}
+
 /** The entries in keybindings.json that are not tode's: imported or written
  * by hand. Also what the wizard's import-conflict scan reads. */
 export function foreignBindings(): Binding[] {
@@ -449,14 +493,36 @@ export function installKeybindings(): boolean {
 
 /** Writes the file as tode's chords, then yours, then the chords the wizard
  * decided must win over an import — vscode reads the file bottom-up. */
+/** Quitting must always work. When the wizard was skipped with an imported
+ * binding still sitting on the quit chord, no decision is on record and that
+ * binding — written after tode's — would silently shadow quit. So on every
+ * install (every open, in practice) the quit binding also rides in the
+ * winners section, after theirs, where vscode's bottom-up read makes it win.
+ * Any decision on that chord, whichever way, switches this off: from then on
+ * it is the user's call. */
+function quitWinsBindings(theirs: Binding[]): Binding[] {
+  const choices = loadDecisions()?.choices ?? {};
+  if (choices[IMPORT_DECISION_ID] || choices[CLAIM_DECISION_ID]) return [];
+  const canon = (chord: string) => chord.toLowerCase().split("+").sort().join("+");
+  const shadowed = theirs.some(
+    (entry) =>
+      !!entry.key &&
+      !!entry.command &&
+      !entry.command.startsWith("-") &&
+      canon(entry.key) === canon(QUIT_CHORD) &&
+      entry.command !== QUIT_COMMAND,
+  );
+  return shadowed ? [{ key: QUIT_CHORD, command: QUIT_COMMAND, when: quitWhen() }] : [];
+}
+
 function writeBindings(mine: Binding[], theirs: Binding[]): boolean {
-  const winners = [...overrideBindings(), ...claimBindings()];
+  const winners = [...overrideBindings(), ...claimBindings(), ...quitWinsBindings(theirs)];
   fs.mkdirSync(USER_DIR, { recursive: true });
   fs.mkdirSync(path.dirname(KEYBINDINGS_RECORD), { recursive: true });
   fs.writeFileSync(KEYBINDINGS_RECORD, `${JSON.stringify([...mine, ...winners], null, 2)}\n`);
   return writeIfChanged(
     KEYBINDINGS_FILE,
-    `// tode's chords, then yours, then what tode shortcuts decided must win\n${JSON.stringify([...mine, ...theirs, ...winners], null, 2)}\n`,
+    `// terminal-code's chords, then yours, then what the shortcut wizard decided must win\n${JSON.stringify([...mine, ...theirs, ...winners], null, 2)}\n`,
   );
 }
 

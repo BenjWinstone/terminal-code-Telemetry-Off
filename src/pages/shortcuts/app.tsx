@@ -30,11 +30,12 @@ export interface Row {
   claimDescribes?: string;
   claimDecision?: Decision | null;
   decision: Decision | null;
+  claims?: (Omit<Claim, "state"> & { decided?: Decision | null })[];
 }
 
-/** A claimant column that joined a row's duel this session: a third (fourth,
- * …) shortcut being managed alongside the two. `state` is undefined while the
- * claim still holds its own chord. */
+/** A claimant column in a row's duel: a third (fourth, …) shortcut being
+ * managed alongside the two. `state` is undefined while the claim still holds
+ * its own chord. */
 interface Claim {
   chord: string;
   command: string;
@@ -42,6 +43,11 @@ interface Claim {
   describes: string;
   when?: string;
   state?: Decision | null;
+  /** pre-seated by the scan: another binding coexisting on the row's own
+   * chord. Not a clash while it sits there — guards are how bindings share —
+   * it only counts once moved somewhere. Absent on claims that hold a chord
+   * some decision moved onto: those clash from the start. */
+  resting?: boolean;
 }
 
 export interface ManagerState {
@@ -49,17 +55,26 @@ export interface ManagerState {
   terminalName: string;
   reloadHint: string;
   intro: boolean;
+  /** done navigates onward during onboarding; standalone it closes the pane */
+  continues: boolean;
   logos: { terminal: string | null; editor: string | null };
 }
 
-type Capturing = { id: string; side: "left" | "right" } | { claim: Claim };
+type Capturing = { id: string; side: "left" | "right" } | { claim: Claim; rowId: string };
 type Menu = { id: string; side: string };
 type Modal = { doLater: true } | { conflict: true };
-type Claims = Record<string, Claim[]>;
 
 const post = async (url: string, payload: unknown) => {
   const response = await fetch(url, { method: "POST", body: JSON.stringify(payload) });
   return response.json();
+};
+
+/** Done during onboarding is a navigation, not an exit: the server names the
+ * next screen (the editor itself, eventually) and this pane simply goes
+ * there, so the terminal never flashes back to its primary buffer. */
+const finish = async () => {
+  const answer = await post("/done", {});
+  if (answer && answer.next) location.replace(answer.next);
 };
 
 const editorKey = (row: Row) =>
@@ -78,15 +93,28 @@ const claimMove = (row: Row) =>
     ? (row.claimDecision.key ?? null)
     : undefined;
 
+/** The claimant columns a row's duel shows, straight off the row the server
+ * derived: existence, order and staged state all come back with every
+ * /decide, so each step always shows the world as the session arranged it. */
+const claimsOf = (row: Row): Claim[] =>
+  (row.claims ?? []).map(({ decided, ...claim }) => ({
+    ...claim,
+    state: decided ?? undefined,
+  }));
+
 /** Every chord this row's sides currently show: the terminal (or claimant)
  * on the left, tode on the right, plus any claimant columns that joined. */
-function rowChords(row: Row, claims: Claims): string[] {
+function rowChords(row: Row): string[] {
   const list: string[] = [];
   const move = row.kind === "import" ? claimMove(row) : terminalMove(row);
   const left = move === undefined ? row.id : move;
   if (left) list.push(left);
   if (!editorUnset(row)) list.push(editorKey(row));
-  for (const claim of claims[row.id] ?? []) {
+  for (const claim of claimsOf(row)) {
+    // a claim resting undisturbed on the row's own chord coexists by its
+    // guard; it joins the count only once it moves somewhere. Every other
+    // claim was seated by a collision in the first place.
+    if (claim.resting && claim.state === undefined) continue;
     const held = claim.state === undefined ? claim.chord : claim.state?.key;
     if (held) list.push(held);
   }
@@ -95,13 +123,13 @@ function rowChords(row: Row, claims: Claims): string[] {
 
 /** The chords bound by more than one side — conflict is a fact about the
  * values on screen, nothing else. */
-function collisions(row: Row, claims: Claims): Set<string> {
+function collisions(row: Row): Set<string> {
   const counts: Record<string, number> = {};
-  for (const chord of rowChords(row, claims)) counts[chord] = (counts[chord] ?? 0) + 1;
+  for (const chord of rowChords(row)) counts[chord] = (counts[chord] ?? 0) + 1;
   return new Set(Object.keys(counts).filter((chord) => counts[chord] > 1));
 }
 
-const conflicted = (row: Row, claims: Claims) => collisions(row, claims).size > 0;
+const conflicted = (row: Row) => collisions(row).size > 0;
 
 /** The unshifted spelling of the punctuation row, by physical key code.
  * Letters are deliberately absent: event.key already reports them unshifted,
@@ -119,6 +147,12 @@ const CODE_KEYS: Record<string, string> = {
   Period: ".",
   Slash: "/",
 };
+
+/** Each conflict costs roughly ten seconds; the estimate reads in minutes. */
+function estimatedMinutes(conflicts: number): string {
+  const minutes = Math.max(1, Math.ceil((conflicts * 10) / 60));
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
 
 function chordFrom(event: KeyboardEvent): string | null {
   const mods: string[] = [];
@@ -161,20 +195,19 @@ const PenIcon = () => (
   </span>
 );
 
-/** A soft hyphen after every character: the text still wraps anywhere, but a
- * wrap now renders a "-" at the break, so a command id split mid-word reads
- * as one wrapped id rather than two ids. Only breaks show the hyphen. */
-const softWrap = (value: string) => Array.from(value).join("­");
+/** Zero-width break opportunities after each dot: a command id wraps at its
+ * own seams, words stay whole, and nothing invents hyphens. */
+const wrappable = (value: string) => value.replaceAll(".", ".​");
 
 /** One labelled-rows table, the shape every column's caption uses. */
 function DetailTable({ entries }: { entries: [string, string][] }) {
   return (
     <div className="detail">
       {entries.map(([label, value]) => (
-        <Fragment key={label}>
+        <div key={label} className="entry">
           <div className="k">{label}</div>
-          <div className="v">{softWrap(value)}</div>
-        </Fragment>
+          <div className="v">{wrappable(value)}</div>
+        </div>
       ))}
     </div>
   );
@@ -182,15 +215,38 @@ function DetailTable({ entries }: { entries: [string, string][] }) {
 
 export function App({ state }: { state: ManagerState }) {
   const FIRST = state.intro ? -1 : 0;
+  // resume where the last visit left off: the first step that still needs a
+  // hand — a live collision, or an undecided claimant column — or straight
+  // onto the confirm table when nothing does. A settled step counts as done
+  // whichever record settled it (an import row's claim decision included),
+  // and earlier steps stay reachable with the back arrow, decisions prefilled.
+  const resumeAt = (() => {
+    const unsettled = state.rows.findIndex(
+      (row) =>
+        conflicted(row) ||
+        claimsOf(row).some((claim) => !claim.resting && claim.state === undefined),
+    );
+    return unsettled === -1 ? state.rows.length : unsettled;
+  })();
   const [rows, setRows] = useState<Row[]>(state.rows);
-  const [at, setAt] = useState(FIRST);
+  const [at, setAt] = useState(state.intro ? FIRST : resumeAt);
   const [capturing, setCapturing] = useState<Capturing | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [modal, setModal] = useState<Modal | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
-  const [claims, setClaims] = useState<Claims>({});
   // whether this session staged anything — what "unapplied changes" means
   const [touched, setTouched] = useState(false);
+  // two silent seconds into a capture, offer typing the chord instead — the
+  // terminal itself may be eating it (an unbind staged but not applied yet),
+  // and then no keypress can ever arrive
+  const [manual, setManual] = useState<"hidden" | "offered" | "typing">("hidden");
+
+  useEffect(() => {
+    setManual("hidden");
+    if (!capturing) return;
+    const timer = setTimeout(() => setManual("offered"), 2000);
+    return () => clearTimeout(timer);
+  }, [capturing]);
 
   const currentRow = () => (at >= 0 && at < rows.length ? rows[at] : null);
   const rowById = (id: string) => rows.find((row) => row.id === id) ?? null;
@@ -207,15 +263,27 @@ export function App({ state }: { state: ManagerState }) {
     if (at < 0) return move(1);
     if (at >= rows.length) return;
     const row = currentRow();
-    if (!row || !conflicted(row, claims)) return move(1);
+    if (!row || !conflicted(row)) return move(1);
     setModal({ conflict: true });
+  }
+
+  /** Swaps in the freshly derived rows. Steps can appear or disappear as
+   * decisions resolve other steps, so the current position follows the row's
+   * id, not its index; a vanished row falls forward to the next question. */
+  function syncRows(fresh: Row[]) {
+    const anchor = at >= 0 && at < rows.length ? rows[at].id : null;
+    setRows(fresh);
+    if (at >= rows.length) return void setAt(fresh.length);
+    if (!anchor) return;
+    const index = fresh.findIndex((row) => row.id === anchor);
+    setAt(index >= 0 ? index : Math.min(at, fresh.length));
   }
 
   async function decide(row: Row, decision: Decision | null, side?: "claim") {
     const fresh = await post("/decide", { id: row.id, kind: row.kind, decision, side });
     // an error body carries no rows; keeping the old ones keeps the page
     // alive to show the warning
-    if (fresh.rows) setRows(fresh.rows);
+    if (fresh.rows) syncRows(fresh.rows);
     setWarning(fresh.ok === false ? fresh.warning : null);
     if (fresh.ok !== false) setTouched(true);
     setCapturing(null);
@@ -223,38 +291,41 @@ export function App({ state }: { state: ManagerState }) {
   }
 
   async function decideClaimChord(claim: Claim, decision: Decision | null) {
-    const fresh = await post("/decide", { id: claim.chord, kind: "claim", decision });
-    if (fresh.rows) setRows(fresh.rows);
-    setClaims((prev) => {
-      const next: Claims = {};
-      for (const [id, list] of Object.entries(prev)) {
-        next[id] = list.map((entry) =>
-          entry.chord === claim.chord ? { ...entry, state: decision ?? undefined } : entry,
-        );
-      }
-      return next;
+    const fresh = await post("/decide", {
+      id: claim.chord,
+      kind: "claim",
+      decision,
+      action: claim.command,
+      guard: claim.when,
     });
+    if (fresh.rows) syncRows(fresh.rows);
+    setWarning(fresh.ok === false ? fresh.warning : null);
+    if (fresh.ok !== false) setTouched(true);
     setMenu(null);
     setCapturing(null);
   }
 
-  async function applyChord(row: Row, side: "left" | "right", chord: string) {
-    const checked = await post("/taken", { chord, id: row.id });
+  async function applyChord(row: Row, side: "left" | "right", chord: string, keepOnError = false) {
+    // the server's self-duel exemptions depend on which side is moving: a
+    // terminal mover may skip another trigger of its own action, an editor
+    // mover a duplicate spelling of its own command — never the reverse. An
+    // import row's left side is an editor binding, so it asks by command,
+    // the way a claim does.
+    const importedLeft = side === "left" && row.kind === "import";
+    const checked = await post("/taken", {
+      chord,
+      id: row.id,
+      side: importedLeft ? undefined : side === "left" ? "terminal" : "editor",
+      command: importedLeft ? row.importedCommand : undefined,
+    });
     if (!checked.ok && !checked.claim) {
       setWarning(checked.warning);
-      setCapturing(null);
+      if (!keepOnError) setCapturing(null);
       return;
     }
-    if (checked.claim) {
-      // an extension holds the chord — the capture applies anyway (a user
-      // keybinding outranks the extension's), and the claimant joins the row
-      // so the value collision is visible and resolvable in place
-      setClaims((prev) => {
-        const list = prev[row.id] ?? [];
-        if (list.some((entry) => entry.chord === checked.claim.chord)) return prev;
-        return { ...prev, [row.id]: [...list, { ...checked.claim, state: undefined }] };
-      });
-    }
+    // a held chord still applies — a user keybinding outranks the holder —
+    // and the decide below brings back rows where the holder has joined the
+    // duel as its own column, visible and resolvable in place
     const final = checked.chord || chord;
     if (side === "left" && row.kind === "import") {
       return decide(row, final === row.id ? null : { choice: "terminal", key: final }, "claim");
@@ -268,7 +339,20 @@ export function App({ state }: { state: ManagerState }) {
     );
   }
 
-  async function captureClaimKey(event: KeyboardEvent, claim: Claim) {
+  async function applyClaimChord(claim: Claim, rowId: string, chord: string) {
+    const checked = await post("/taken", { chord, id: claim.chord, command: claim.command });
+    if (!checked.ok && !checked.claim) {
+      setWarning(checked.warning);
+      return;
+    }
+    // when the new chord has a holder of its own, the decide below brings it
+    // back as one more column in the same duel — the chain goes as far as the
+    // user takes it
+    const final = checked.chord || chord;
+    await decideClaimChord(claim, final === claim.chord ? null : { choice: "terminal", key: final });
+  }
+
+  async function captureClaimKey(event: KeyboardEvent, claim: Claim, rowId: string) {
     event.preventDefault();
     if (event.key === "Escape") {
       setCapturing(null);
@@ -277,14 +361,56 @@ export function App({ state }: { state: ManagerState }) {
     }
     const chord = chordFrom(event);
     if (!chord) return;
-    const checked = await post("/taken", { chord, id: claim.chord });
-    if (!checked.ok) {
-      setWarning(checked.warning);
+    await applyClaimChord(claim, rowId, chord);
+  }
+
+  /** The typed chord goes through the same /taken pipeline a captured one
+   * does — the server normalises spellings (meta/super → cmd, mod order) and
+   * vets the holder — so both entry paths mean exactly the same thing. */
+  async function submitManual(text: string) {
+    const typed = text.trim().toLowerCase();
+    if (!typed || !capturing) return;
+    if ("claim" in capturing) {
+      await applyClaimChord(capturing.claim, capturing.rowId, typed);
       return;
     }
-    await decideClaimChord(
-      claim,
-      checked.chord === claim.chord ? null : { choice: "terminal", key: checked.chord },
+    const row = rowById(capturing.id);
+    if (row) await applyChord(row, capturing.side, typed, true);
+  }
+
+  function manualInput() {
+    return (
+      <input
+        className="box manualentry"
+        autoFocus
+        placeholder="type it: ctrl+alt+w"
+        onClick={(event) => event.stopPropagation()}
+        // leaving the field means the typing is done — a click elsewhere
+        // submits what was typed, the same as enter
+        onBlur={(event) => void submitManual(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") void submitManual(event.currentTarget.value);
+          if (event.key === "Escape") {
+            setCapturing(null);
+            setWarning(null);
+          }
+        }}
+      />
+    );
+  }
+
+  function manualOffer() {
+    return (
+      <button
+        className="manualoffer"
+        onClick={(event) => {
+          event.stopPropagation();
+          setManual("typing");
+        }}
+      >
+        click for manual
+      </button>
     );
   }
 
@@ -308,13 +434,15 @@ export function App({ state }: { state: ManagerState }) {
   // the same keys wherever focus sits, exactly as the footer promises
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      // while recording, every key is a candidate chord — including ctrl+c
-      if (capturing && "claim" in capturing) return void captureClaimKey(event, capturing.claim);
+      // while recording, every key is a candidate chord — including ctrl+c —
+      // unless the manual input owns the keyboard
+      if (capturing && manual === "typing") return;
+      if (capturing && "claim" in capturing) return void captureClaimKey(event, capturing.claim, capturing.rowId);
       if (capturing) return void captureKey(event, capturing);
       // ctrl+c quits from anywhere else, the way it would in the terminal
       if (event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "c") {
         event.preventDefault();
-        void post("/done", {});
+        void finish();
         return;
       }
       if (modal) {
@@ -336,7 +464,7 @@ export function App({ state }: { state: ManagerState }) {
       else if (key === "u" && currentRow()) void decide(currentRow()!, null);
       // the footer promises q skips this — and ctrl+c must not be the only
       // door out of a page whose whole subject is that ctrl+c is contested
-      else if (key === "q") void post("/done", {});
+      else if (key === "q") void finish();
       else return;
       event.preventDefault();
     };
@@ -406,7 +534,7 @@ export function App({ state }: { state: ManagerState }) {
   }
 
   function renderBox(row: Row, side: "left" | "right", mini: boolean) {
-    const colliding = collisions(row, claims);
+    const colliding = collisions(row);
     const isStatic =
       side === "left" && row.kind === "import" && (row.claimant || "imported") === "imported";
     const isCapturing =
@@ -430,10 +558,10 @@ export function App({ state }: { state: ManagerState }) {
     const onClick = (event: React.MouseEvent) => {
       event.stopPropagation();
       if (capturing) {
-        // clicking the box that is listening stops the capture and brings its
-        // menu back — custom starts it again, unset unsets
-        if (!isCapturing) return;
+        // clicking any box while one is listening stops the capture and opens
+        // the clicked box's menu — no box is ever dead to a click
         setCapturing(null);
+        setWarning(null);
         setMenu({ id: row.id, side });
         return;
       }
@@ -441,13 +569,18 @@ export function App({ state }: { state: ManagerState }) {
     };
     return (
       <div className="boxwrap">
-        <button
-          className={"box" + (mini ? " mini" : "") + extra}
-          onClick={isStatic ? undefined : onClick}
-        >
-          <span>{shown}</span>
-          {!isStatic && <PenIcon />}
-        </button>
+        {isCapturing && manual === "typing" ? (
+          manualInput()
+        ) : (
+          <button
+            className={"box" + (mini ? " mini" : "") + extra}
+            onClick={isStatic ? undefined : onClick}
+          >
+            <span>{shown}</span>
+            {!isStatic && <PenIcon />}
+          </button>
+        )}
+        {isCapturing && manual === "offered" && manualOffer()}
         {menuOpen && !isStatic && (
           <div className="menu" onClick={(event) => event.stopPropagation()}>
             {menuItems(row, side).map((item) => (
@@ -472,9 +605,10 @@ export function App({ state }: { state: ManagerState }) {
    * and capture the other columns have, because it is simply a third shortcut
    * being managed. */
   function renderClaimBox(row: Row, claim: Claim, mini: boolean) {
-    const menuId = "claim:" + claim.chord;
+    const menuId = "claim:" + claim.chord + ":" + claim.command;
     const isCapturing =
-      !!capturing && "claim" in capturing && capturing.claim.chord === claim.chord;
+      !!capturing && "claim" in capturing &&
+      capturing.claim.chord === claim.chord && capturing.claim.command === claim.command;
     const menuOpen = !!menu && menu.id === menuId;
     const held = claim.state; // undefined = still holds its chord
     const shown = isCapturing
@@ -483,20 +617,30 @@ export function App({ state }: { state: ManagerState }) {
     let extra = "";
     if (isCapturing) extra = " capturing";
     else if (held !== undefined && !held?.key) extra = " unbound";
-    else if (collisions(row, claims).has(shown)) extra = " clash";
+    else if (collisions(row).has(shown)) extra = " clash";
     return (
       <div className="boxwrap">
-        <button
-          className={"box" + (mini ? " mini" : "") + extra}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (capturing) return;
-            setMenu(menuOpen ? null : { id: menuId, side: "claim" });
-          }}
-        >
-          <span>{shown}</span>
-          <PenIcon />
-        </button>
+        {isCapturing && manual === "typing" ? (
+          manualInput()
+        ) : (
+          <button
+            className={"box" + (mini ? " mini" : "") + extra}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (capturing) {
+                setCapturing(null);
+                setWarning(null);
+                setMenu({ id: menuId, side: "claim" });
+                return;
+              }
+              setMenu(menuOpen ? null : { id: menuId, side: "claim" });
+            }}
+          >
+            <span>{shown}</span>
+            <PenIcon />
+          </button>
+        )}
+        {isCapturing && manual === "offered" && manualOffer()}
         {menuOpen && (
           <div className="menu" onClick={(event) => event.stopPropagation()}>
             {[
@@ -504,7 +648,7 @@ export function App({ state }: { state: ManagerState }) {
                 label: "custom",
                 commit: () => {
                   setMenu(null);
-                  setCapturing({ claim });
+                  setCapturing({ claim, rowId: row.id });
                 },
               },
               held !== undefined
@@ -570,12 +714,17 @@ export function App({ state }: { state: ManagerState }) {
   }
 
   function renderClaimColumn(row: Row, claim: Claim) {
+    const entries: [string, string][] = [
+      ["description", claim.describes],
+      ["command", claim.command],
+      ...(claim.when ? ([["when", claim.when]] as [string, string][]) : []),
+    ];
     return (
-      <div className="app" key={claim.chord}>
+      <div className="app" key={claim.chord + ":" + claim.command}>
         <div className="name">{claim.claimant}</div>
         {renderClaimBox(row, claim, false)}
         <div className="caption">
-          <DetailTable entries={[["description", claim.describes]]} />
+          <DetailTable entries={entries} />
         </div>
       </div>
     );
@@ -584,13 +733,13 @@ export function App({ state }: { state: ManagerState }) {
   /** The duel is the one conflict component: the two sides of a chord, plus
    * any claimant columns that joined. */
   function renderDuel(row: Row) {
-    const contested = [...collisions(row, claims)];
+    const contested = [...collisions(row)];
     return (
       <div className="duel-block">
         <div className="duel">
           {renderColumn(row, "left")}
           {renderColumn(row, "right")}
-          {(claims[row.id] ?? []).map((claim) => renderClaimColumn(row, claim))}
+          {claimsOf(row).map((claim) => renderClaimColumn(row, claim))}
         </div>
         <div className={"verdict" + (contested.length ? " bad" : " good")}>
           {contested.length === 0 ? "no conflict" : "conflict detected"}
@@ -627,8 +776,8 @@ export function App({ state }: { state: ManagerState }) {
               names to rest on each chord box's top edge — the arrows must
               touch what they mean: the button */}
           <svg className="tiparrows" width={560} height={72} viewBox="0 0 560 72" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path d="M262 6 L 210 6 L 210 66" /><path d="M204 59 L 210 67 L 216 59" />
-            <path d="M298 6 L 350 6 L 350 66" /><path d="M344 59 L 350 67 L 356 59" />
+            <path d="M262 6 L 210 6 L 210 60" /><path d="M204 53 L 210 61 L 216 53" />
+            <path d="M298 6 L 350 6 L 350 60" /><path d="M344 53 L 350 61 L 356 53" />
           </svg>
         </div>
         {renderDuel(row)}
@@ -649,11 +798,22 @@ export function App({ state }: { state: ManagerState }) {
           </div>
           <div className="introrest">
             For the best experience, continue onboarding to resolve the shortcut conflicts. You can
-            also skip this step and run <kbd>tode shortcuts</kbd> to resolve them later.
+            also skip this step and run <kbd>tode shortcut-setup</kbd> to resolve them later.
           </div>
+          <div className="introrest">Estimated Time: {estimatedMinutes(rows.length)}</div>
           <div className="introactions">
-            <button onClick={() => void post("/done", {})}>do later</button>
-            <button className="primary" id="intro-go" onClick={() => move(1)}>
+            <button onClick={() => void finish()}>do later</button>
+            <button
+              className="primary"
+              id="intro-go"
+              onClick={() => {
+                setWarning(null);
+                setCapturing(null);
+                setModal(null);
+                setMenu(null);
+                setAt(resumeAt);
+              }}
+            >
               continue
             </button>
           </div>
@@ -672,11 +832,11 @@ export function App({ state }: { state: ManagerState }) {
       if (row.kind === "import" && row.claimant && !claimants.includes(row.claimant)) {
         claimants.push(row.claimant);
       }
-      for (const claim of claims[row.id] ?? []) {
+      for (const claim of claimsOf(row)) {
         if (!claimants.includes(claim.claimant)) claimants.push(claim.claimant);
       }
     }
-    const open = rows.filter((row) => conflicted(row, claims));
+    const open = rows.filter((row) => conflicted(row));
     const head = (logo: string | null, label: string) => (
       <div className="f-head" key={"head:" + label}>
         {logo ? <img src={logo} alt="" /> : null}
@@ -700,7 +860,7 @@ export function App({ state }: { state: ManagerState }) {
               {row.kind === "terminal" ? renderBox(row, "left", true) : <div />}
               {renderBox(row, "right", true)}
               {claimants.map((claimant) => {
-                const claim = (claims[row.id] ?? []).find((entry) => entry.claimant === claimant);
+                const claim = claimsOf(row).find((entry) => entry.claimant === claimant);
                 return (
                   <Fragment key={claimant}>
                     {claim
@@ -714,16 +874,22 @@ export function App({ state }: { state: ManagerState }) {
             </Fragment>
           ))}
         </div>
-        <button
-          className="go"
-          id="apply"
-          onClick={async () => {
-            await post("/confirm", {});
-            void post("/done", {});
-          }}
-        >
-          apply these changes
-        </button>
+        <div className="confirmnav">
+          <button className="go quiet" disabled={rows.length === 0} onClick={() => setAt(rows.length - 1)}>
+            <ArrowLeftIcon />
+            <span>back</span>
+          </button>
+          <button
+            className="go"
+            id="apply"
+            onClick={async () => {
+              await post("/confirm", {});
+              void finish();
+            }}
+          >
+            apply these changes
+          </button>
+        </div>
         <div className="warn">
           {warning ? "⚠ " + warning : open.length ? `${open.length} still conflicting` : ""}
         </div>
@@ -749,27 +915,27 @@ export function App({ state }: { state: ManagerState }) {
               </div>
             )}
             <div className="note">
-              You can run <kbd>tode shortcuts</kbd> in your terminal to continue resolving shortcuts.
+              You can run <kbd>tode shortcut-setup</kbd> in your terminal to continue resolving shortcuts.
             </div>
             <div className="actions compact">
               {pending > 0 ? (
                 <>
-                  <button className="option" onClick={() => void post("/done", {})}>
-                    continue without applying
+                  <button className="option" onClick={() => void finish()}>
+                    {state.continues ? "continue without applying" : "quit without applying"}
                   </button>
                   <button
                     className="option primary"
                     onClick={async () => {
                       await post("/confirm", {});
-                      void post("/done", {});
+                      void finish();
                     }}
                   >
                     apply and continue
                   </button>
                 </>
               ) : (
-                <button className="option primary" onClick={() => void post("/done", {})}>
-                  continue to terminal-code
+                <button className="option primary" onClick={() => void finish()}>
+                  {state.continues ? "continue to terminal-code" : "quit"}
                 </button>
               )}
             </div>
@@ -785,16 +951,7 @@ export function App({ state }: { state: ManagerState }) {
           <div className="title">shortcuts still conflict</div>
           <div className="actions split">
             <button
-              className="option danger"
-              onClick={() => {
-                setModal(null);
-                move(1);
-              }}
-            >
-              continue with conflict
-            </button>
-            <button
-              className="option primary"
+              className="option"
               onClick={async () => {
                 setModal(null);
                 if (row) await decide(row, { choice: "keep" });
@@ -804,6 +961,15 @@ export function App({ state }: { state: ManagerState }) {
               <span>unset</span>
               <TodeChip />
               <span>bind</span>
+            </button>
+            <button
+              className="option danger"
+              onClick={() => {
+                setModal(null);
+                move(1);
+              }}
+            >
+              continue with conflict
             </button>
           </div>
         </div>

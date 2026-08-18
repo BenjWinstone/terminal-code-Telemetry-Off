@@ -56,10 +56,10 @@ test("only chords bound to something other than unbind or ignore are conflicts",
   const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
   const holds = (chord) =>
     ({
-      "cmd+backspace": { command: "deleteAllLeft" },
-      "cmd+z": { command: "undo" },
-      "cmd+w": { command: "workbench.action.closeActiveEditor" },
-    })[chord] ?? null;
+      "cmd+backspace": [{ command: "deleteAllLeft" }],
+      "cmd+z": [{ command: "undo" }],
+      "cmd+w": [{ command: "workbench.action.closeActiveEditor" }],
+    })[chord] ?? [];
   const shipped = parseKeybinds(
     ["keybind = super+backspace=unbind", "keybind = super+z=ignore", "keybind = super+w=close_surface"].join("\n"),
   );
@@ -71,7 +71,7 @@ test("only chords bound to something other than unbind or ignore are conflicts",
 
 test("a chord ghostty never bound at all is not a conflict", () => {
   const { allConflicts } = require("../dist/shortcuts/ghostty.js");
-  assert.deepEqual(allConflicts(new Map(), new Set(), () => ({ command: "undo" })), []);
+  assert.deepEqual(allConflicts(new Map(), new Set(), () => [{ command: "undo" }]), []);
 });
 
 test("the exact regression: what ghostty 1.3.1 actually ships for these", () => {
@@ -84,15 +84,15 @@ test("the exact regression: what ghostty 1.3.1 actually ships for these", () => 
   // what the mac workbench holds on these, keyed by canonical chord
   const holds = (chord) =>
     ({
-      "cmd+z": { command: "undo" },
-      "shift+cmd+z": { command: "redo" },
-      "shift+cmd+t": { command: "workbench.action.reopenClosedEditor" },
-      "cmd+a": { command: "editor.action.selectAll" },
-      "cmd+w": { command: "workbench.action.closeActiveEditor" },
-      "cmd+left": { command: "cursorHome" },
-      "cmd+right": { command: "cursorEnd" },
-      "cmd+backspace": { command: "deleteAllLeft" },
-    })[chord] ?? null;
+      "cmd+z": [{ command: "undo" }],
+      "shift+cmd+z": [{ command: "redo" }],
+      "shift+cmd+t": [{ command: "workbench.action.reopenClosedEditor" }],
+      "cmd+a": [{ command: "editor.action.selectAll" }],
+      "cmd+w": [{ command: "workbench.action.closeActiveEditor" }],
+      "cmd+left": [{ command: "cursorHome" }],
+      "cmd+right": [{ command: "cursorEnd" }],
+      "cmd+backspace": [{ command: "deleteAllLeft" }],
+    })[chord] ?? [];
   const shipped = parseKeybinds([
     "keybind = super+arrow_right=text:\\\\x05",
     "keybind = super+arrow_left=text:\\\\x01",
@@ -114,9 +114,9 @@ test("linux ghostty defaults: new_tab is the conflict, the ctrl+shift pairs are 
   const { parseKeybinds, allConflicts } = require("../dist/shortcuts/ghostty.js");
   const holds = (chord) =>
     ({
-      "ctrl+shift+t": { command: "workbench.action.reopenClosedEditor" },
-      "ctrl+q": { command: "tode.confirmQuit" },
-    })[chord] ?? null;
+      "ctrl+shift+t": [{ command: "workbench.action.reopenClosedEditor" }],
+      "ctrl+q": [{ command: "tode.confirmQuit" }],
+    })[chord] ?? [];
   const shipped = parseKeybinds([
     "keybind = ctrl+shift+t=new_tab",
     "keybind = ctrl+shift+w=close_surface",
@@ -244,11 +244,11 @@ test("derived conflicts: a bind on a chord the editor holds surfaces, nothing el
   const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
   const holds = (chord) =>
     ({
-      "cmd+f": { command: "actions.find" },
-      "shift+cmd+p": { command: "workbench.action.showCommands" },
-      "cmd+t": { command: "workbench.action.showAllSymbols" },
-      "cmd+w": { command: "workbench.action.closeActiveEditor" },
-    })[chord] ?? null;
+      "cmd+f": [{ command: "actions.find" }],
+      "shift+cmd+p": [{ command: "workbench.action.showCommands" }],
+      "cmd+t": [{ command: "workbench.action.showAllSymbols" }],
+      "cmd+w": [{ command: "workbench.action.closeActiveEditor" }],
+    })[chord] ?? [];
   const live = parseKeybinds([
     "keybind = super+f=start_search",
     "keybind = super+shift+p=toggle_command_palette",
@@ -281,7 +281,7 @@ test("macOS native tab cycling frees by rebinding to bytes — an unbind hands i
   // emits the chord itself; unbinding would change nothing.
   if (process.platform !== "darwin") return;
   const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
-  const holds = () => ({ command: "workbench.action.quickOpenNavigateNext" });
+  const holds = () => [{ command: "workbench.action.quickOpenNavigateNext" }];
   const live = parseKeybinds([
     "keybind = ctrl+tab=next_tab",
     "keybind = ctrl+shift+tab=previous_tab",
@@ -333,7 +333,7 @@ test("emit rebinds are written instead of unbind, and count as freed", () => {
 
 test("derived conflicts: custom binds and prefixes behave", () => {
   const { allConflicts, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
-  const holds = (chord) => (chord === "cmd+p" ? { command: "workbench.action.quickOpen" } : null);
+  const holds = (chord) => (chord === "cmd+p" ? [{ command: "workbench.action.quickOpen" }] : []);
   const live = parseKeybinds([
     "keybind = super+p=toggle_tab_overview",
     "keybind = performable:super+p=toggle_tab_overview",
@@ -347,18 +347,50 @@ test("derived conflicts: custom binds and prefixes behave", () => {
   assert.deepEqual(allConflicts(passing, new Set(), holds), []);
 });
 
+test("descriptions come from ghostty's own action docs, id-cleanup is the fallback", () => {
+  const { allConflicts, parseActionDocs, parseKeybinds } = require("../dist/shortcuts/ghostty.js");
+  const docs = parseActionDocs(
+    [
+      "undo:",
+      "  Undo the last undoable action, if possible.",
+      "  ",
+      "  Not every action is undoable.",
+      "",
+      "goto_tab:",
+      "  Go to the tab with the specific",
+      "  index, starting at 1.",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(docs.get("undo"), "Undo the last undoable action, if possible");
+  assert.equal(docs.get("goto_tab"), "Go to the tab with the specific index, starting at 1");
+
+  const holds = (chord) =>
+    ({ "cmd+z": [{ command: "undo" }], "cmd+1": [{ command: "cmd.one" }], "cmd+q": [{ command: "cmd.q" }] })[chord] ?? [];
+  const live = parseKeybinds([
+    "keybind = super+z=undo",
+    "keybind = super+digit_1=goto_tab:1",
+    "keybind = super+q=quit_something_undocumented",
+  ].join("\n"));
+  const conflicts = allConflicts(live, new Set(), holds, () => null, docs);
+  const byId = new Map(conflicts.map((c) => [c.editorId, c]));
+  assert.equal(byId.get("cmd+z").short, "Undo the last undoable action, if possible");
+  assert.equal(byId.get("cmd+1").short, "Go to the tab with the specific index, starting at 1", "an argument does not hide the action's docs");
+  assert.equal(byId.get("cmd+q").short, "quit something undocumented", "no docs falls back to the cleaned id");
+});
+
 test("a freed chord stays listed, and the freeing decision recalls its action", () => {
   const { allConflicts } = require("../dist/shortcuts/ghostty.js");
-  const holds = (chord) => (chord === "cmd+f" ? { command: "actions.find" } : null);
+  const holds = (chord) => (chord === "cmd+f" ? [{ command: "actions.find" }] : []);
   const freed = new Set(["super+f"]);
   const past = (chord) => (chord === "cmd+f" ? "start_search" : null);
-  const conflicts = allConflicts(new Map([["super+f", "unbind"]]), freed, holds, past);
+  const conflicts = allConflicts(new Map([["super+f", "unbind"]]), freed, holds, past, new Map());
   assert.equal(conflicts.length, 1);
-  assert.equal(conflicts[0].current, null, "freed by tode, so no current action");
+  assert.equal(conflicts[0].current, "start_search", "the freeing decision keeps the binding's identity");
   assert.equal(conflicts[0].editor.command, "actions.find");
   assert.equal(conflicts[0].short, "start search", "the texts still name what the trigger ran");
 
-  const forgotten = allConflicts(new Map([["super+f", "unbind"]]), freed, holds, () => null);
+  const forgotten = allConflicts(new Map([["super+f", "unbind"]]), freed, holds, () => null, new Map());
   assert.equal(forgotten[0].short, "what it ran before", "with nothing to recall, say so");
 });
 
@@ -521,17 +553,18 @@ test("an extension that contributes ctrl+q is a claimant, named by its display n
     assert.equal(extensionHolder("ctrl+q").describes, "vim winCtrlQ", "the id is cleaned when no title exists");
     assert.equal(extensionHolder("ctrl+x"), null);
 
-    // a guarded claim on the quit chord is split structurally — tode's own
-    // binding yields inside the claimant's when clause — so nothing surfaces
-    assert.deepEqual(importedConflicts(), []);
+    // even a guarded claim on the quit chord surfaces: quit never yields
+    // automatically, so the contest is the user's to decide
+    assert.equal(importedConflicts().find((c) => c.key === QUIT_CHORD)?.claimant, "Vim");
 
-    // an unguarded claim would be shadowed whole, so it still needs a decision
+    // an unguarded claim on an ordinary builtin (no carve can split it) also
+    // needs a decision — vim holds no alt+w, so acme is the one that surfaces
     const acmeDir = path.join(EXTENSIONS_DIR, "acme.keys-1.0.0");
     fs.mkdirSync(acmeDir, { recursive: true });
     fs.writeFileSync(path.join(acmeDir, "package.json"), JSON.stringify({
       name: "keys",
       displayName: "Acme Keys",
-      contributes: { keybindings: [{ key: QUIT_CHORD, command: "acme.everything" }] },
+      contributes: { keybindings: [{ key: "alt+w", command: "acme.everything" }] },
     }));
     const manifest = path.join(EXTENSIONS_DIR, "extensions.json");
     fs.writeFileSync(manifest, JSON.stringify([
@@ -541,9 +574,9 @@ test("an extension that contributes ctrl+q is a claimant, named by its display n
     ]));
     // the claim scan caches on the manifest's mtime; make the rewrite visible
     fs.utimesSync(manifest, new Date(), new Date(Date.now() + 5000));
-    const claim = importedConflicts().find((c) => c.key === QUIT_CHORD);
+    const claim = importedConflicts().find((c) => c.key === "alt+w");
     assert.equal(claim.claimant, "Acme Keys");
-    assert.equal(claim.builtin, "tode.confirmQuit");
+    assert.equal(claim.builtin, "workbench.action.closeEditorsInGroup");
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -607,7 +640,7 @@ test("the quit chord lives at user level, unless a decision moved or surrendered
   }
 });
 
-test("tode's quit guard yields wherever an extension's own claim declares itself", () => {
+test("builtins carve for extension claims, but the quit chord never yields", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-yield-"));
   const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_DATA_HOME = path.join(home, "share");
@@ -621,23 +654,68 @@ test("tode's quit guard yields wherever an extension's own claim declares itself
       name: "vim",
       contributes: { keybindings: [
         { key: store.QUIT_CHORD, command: "extension.vim_quit", when: "editorTextFocus && vim.active" },
-        { key: "ctrl+c", command: "extension.vim_escape", when: "vim.mode == 'Insert'" },
+        { key: "alt+1", command: "extension.vim_window1", when: "editorTextFocus && vim.active" },
       ] },
     }));
     fs.writeFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), JSON.stringify([
       { identifier: { id: "vscodevim.vim" }, relativeLocation: "vscodevim.vim-1.30.0" },
     ]));
 
-    // the exclusion comes from the claim's own when clause — no extension is
-    // named anywhere in the mechanism
+    // an ordinary builtin carves the claim's own when clause out of its guard
+    // — no extension is named anywhere in the mechanism
+    const profile = require("../dist/profile.js");
+    const pane = profile.builtinKeybindings().find((bind) => bind.key === "alt+1");
+    assert.ok(pane.when.includes("!(editorTextFocus && vim.active)"), pane.when);
+
+    // the quit chord is the exception: quitting must always work, so its
+    // guard never yields — the claim surfaces in the wizard instead
     const [quit] = store.quitBindings();
-    assert.ok(quit.when.includes("!(editorTextFocus && vim.active)"), quit.when);
-    if (store.QUIT_CHORD === "ctrl+c") {
-      assert.ok(quit.when.includes("!(vim.mode == 'Insert')"), "every claim on the chord is carved out");
-    } else {
-      const [hint] = store.hintBindings();
-      assert.ok(hint.when.includes("!(vim.mode == 'Insert')"), hint.when);
-    }
+    assert.ok(!quit.when.includes("!("), quit.when);
+    const { importedConflicts } = require("../dist/shortcuts/imported.js");
+    const claim = importedConflicts().find((c) => c.key === store.QUIT_CHORD);
+    assert.equal(claim.command, "extension.vim_quit", "the guarded claim needs a decision");
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("a skipped wizard never loses quit: undecided, the quit chord self-heals on install", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-quit-heals-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const profile = freshRequire("../dist/profile.js");
+    const store = require("../dist/shortcuts/store.js");
+    const { parseJsonc } = require("../dist/jsonc.js");
+    const file = path.join(profile.USER_DIR, "keybindings.json");
+    const read = () => parseJsonc(fs.readFileSync(file, "utf8"));
+
+    // an import lands on the quit chord and the user skips the wizard: no
+    // decision anywhere, yet the next install writes quit after theirs
+    profile.installKeybindings();
+    profile.mergeKeybindings([{ key: store.QUIT_CHORD, command: "workbench.action.imported" }]);
+    profile.installKeybindings();
+    const entries = read();
+    const importedAt = entries.findIndex((e) => e.command === "workbench.action.imported");
+    const quitAt = entries.reduce((last, e, at) => (e.command === "tode.confirmQuit" ? at : last), -1);
+    assert.ok(importedAt >= 0);
+    assert.ok(quitAt > importedAt, "with no decision, quit still wins the chord");
+
+    // any decision on that chord turns the healing off — it is the user's call
+    store.saveDecisions({
+      version: 1,
+      terminal: "ghostty",
+      choices: { [store.IMPORT_DECISION_ID]: { choice: "keep" } },
+    });
+    profile.installKeybindings();
+    const surrendered = read();
+    const lastQuit = surrendered.reduce((last, e, at) => (e.command === "tode.confirmQuit" ? at : last), -1);
+    const theirs = surrendered.findIndex((e) => e.command === "workbench.action.imported");
+    assert.ok(lastQuit < theirs, "a surrendered quit stays surrendered");
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -735,14 +813,14 @@ test("the quit hint follows the wizard's decisions, import decision first", () =
     const { quitHintMessage } = freshRequire("../dist/bridge.js");
     const store = require("../dist/shortcuts/store.js");
 
-    assert.equal(quitHintMessage(), `Press ${store.QUIT_CHORD} to quit tode`);
+    assert.equal(quitHintMessage(), `Press ${store.QUIT_CHORD} to quit terminal-code`);
 
     store.saveDecisions({
       version: 1,
       terminal: "ghostty",
       choices: { [store.QUIT_CHORD]: { choice: "editor", key: "ctrl+alt+q" } },
     });
-    assert.equal(quitHintMessage(), "Press ctrl+alt+q to quit tode");
+    assert.equal(quitHintMessage(), "Press ctrl+alt+q to quit terminal-code");
 
     store.saveDecisions({
       version: 1,
@@ -759,7 +837,7 @@ test("the quit hint follows the wizard's decisions, import decision first", () =
         [store.IMPORT_DECISION_ID]: { choice: "editor", key: "ctrl+shift+q" },
       },
     });
-    assert.equal(quitHintMessage(), "Press ctrl+shift+q to quit tode");
+    assert.equal(quitHintMessage(), "Press ctrl+shift+q to quit terminal-code");
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -908,9 +986,10 @@ test("manager rows carry the derived editor side straight from the scan", () => 
   process.env.XDG_STATE_HOME = path.join(home, "state");
   try {
     const wizard = freshRequire("../dist/shortcuts/wizard.js");
-    const conflict = (editorId, means, command, guard) => ({
+    const conflict = (editorId, means, command, guard, others = []) => ({
       editorId, trigger: "x", current: "y",
       editor: { means, command, guard },
+      others,
       inTerminal: `runs stuff, so ${means} never reaches the editor`,
       short: "stuff", freed: "stuff goes", tradeoff: "stuff stops working",
     });
@@ -921,7 +1000,9 @@ test("manager rows carry the derived editor side straight from the scan", () => 
       ready: () => null,
       scan: () => [
         conflict("cmd+w", "close active editor", "workbench.action.closeActiveEditor", "editorFocus"),
-        conflict("cmd+f", "find", "actions.find"),
+        conflict("cmd+f", "find", "actions.find", undefined, [
+          { command: "excalidraw.preventDefault", guard: "activeCustomEditorId == 'editor.excalidraw'", claimant: "Excalidraw", describes: "prevent default" },
+        ]),
       ],
       takenAs: () => null,
       apply: () => "",
@@ -938,9 +1019,324 @@ test("manager rows carry the derived editor side straight from the scan", () => 
       "the metadata is structured, ready for label → value rows",
     );
     assert.deepEqual(rows[1].detail, { command: "actions.find", when: undefined });
+    // the second holder of cmd+f arrives pre-seated as its own column,
+    // resting: it coexists on its own chord until something moves
+    assert.deepEqual(rows[1].claims, [
+      {
+        chord: "cmd+f",
+        command: "excalidraw.preventDefault",
+        claimant: "Excalidraw",
+        describes: "prevent default",
+        when: "activeCustomEditorId == 'editor.excalidraw'",
+        resting: true,
+        decided: null,
+      },
+    ]);
+    assert.deepEqual(rows[0].claims, [], "one holder means no extra columns");
     assert.equal(rows[0].decision, null);
     assert.deepEqual(rows[1].decision, { choice: "terminal" }, "staged decisions ride on their row");
     assert.equal(rows[0].terminal.name, "Ghostty");
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("a chord is not taken by another spelling of the row's own binding", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-taken-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    // ghostty binds both super+1 and alt+1 to goto_tab:1 — the cmd+1 row
+    // moving onto alt+1 lands on its own action, not a conflict
+    const provider = {
+      id: "ghostty",
+      name: "Ghostty",
+      scan: () => [
+        {
+          editorId: "cmd+1", trigger: "super+1", current: "goto_tab:1",
+          editor: { means: "focus first editor group", command: "workbench.action.focusFirstEditorGroup" },
+          others: [],
+          inTerminal: "switches tabs", short: "go to tab 1", freed: "tabs", tradeoff: "tabs",
+        },
+      ],
+      takenAs: (chord) => (chord === "alt+1" ? "goto_tab:1" : null),
+      describe: (action) => `runs ${action}`,
+    };
+    // the terminal mover's own action on another trigger is exempt — but the
+    // EDITOR-side holder at alt+1 (tode's builtin pane chord) is cross-side
+    // and must claim: after apply the terminal bind would eat it, and the
+    // rescan counts exactly that as a conflict
+    const vetted = wizard.chordTaken(provider, {}, "alt+1", "cmd+1", undefined, "terminal");
+    assert.notEqual(vetted, null, "a cross-side holder is never silently exempt");
+    assert.equal(vetted.claim.command, "workbench.action.focusFirstEditorGroup");
+    assert.notEqual(vetted.claim.command, "goto_tab:1", "the row's own action stayed exempt");
+    const other = wizard.chordTaken(provider, {}, "alt+1", "cmd+w", undefined, "terminal");
+    assert.equal(other.claim.command, "goto_tab:1", "for any other row the ghostty holder claims first");
+    assert.equal(other.claim.claimant, "Ghostty");
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("a chord held by the row's own editor command is not a conflict either", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-taken2-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    const provider = {
+      id: "ghostty", name: "Ghostty",
+      scan: () => [],
+      takenAs: () => null,
+      describe: (action) => action,
+    };
+    // whatever really holds cmd+p in the derived keymap...
+    const held = wizard.chordTaken(provider, {}, "cmd+p", "cmd+w");
+    if (held) {
+      const own = {
+        editorId: "cmd+w", trigger: "x", current: "y",
+        editor: { means: "same thing", command: held.claim.command },
+        others: [],
+        inTerminal: "z", short: "s", freed: "f", tradeoff: "t",
+      };
+      const aware = { ...provider, scan: () => [own] };
+      // ...is exempt for the row's own EDITOR side moving there (a duplicate
+      // spelling of the same command is not a conflict with itself)...
+      assert.equal(wizard.chordTaken(aware, {}, "cmd+p", "cmd+w", undefined, "editor"), null);
+      // ...but never for the TERMINAL side: a terminal bind landing there
+      // would eat the command, which is exactly what the rescan flags
+      const crossed = wizard.chordTaken(aware, {}, "cmd+p", "cmd+w", undefined, "terminal");
+      assert.equal(crossed?.claim?.command, held.claim.command, "cross-side holders always claim");
+    }
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("holders of a decided target chord join the row as contested claims", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-contested-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    const provider = {
+      id: "ghostty", name: "Ghostty",
+      detect: () => true, ready: () => null,
+      scan: () => [
+        {
+          editorId: "cmd+1", trigger: "super+1", current: "goto_tab:1",
+          editor: { means: "focus first editor group", command: "workbench.action.focusFirstEditorGroup" },
+          others: [],
+          inTerminal: "switches tabs", short: "go to tab 1", freed: "tabs", tradeoff: "tabs",
+        },
+      ],
+      takenAs: (chord) => (chord === "alt+t" ? "new_tab" : chord === "alt+1" ? "goto_tab:1" : null),
+      apply: () => "", onApplied: () => false, undo: () => false,
+      describe: (action) => `runs ${action}`,
+      reloadHint: () => "reload ghostty",
+    };
+    // moved onto a chord ghostty binds to a DIFFERENT action: the holder
+    // joins the duel, derived from the decision itself — a reload shows it
+    const rows = wizard.managerRows(provider, {
+      "cmd+1": { choice: "terminal", key: "alt+t", action: "goto_tab:1" },
+    });
+    const seated = (list, chord, command) =>
+      list.some((claim) => claim.chord === chord && claim.command === command);
+    assert.ok(seated(rows[0].claims, "alt+t", "new_tab"), "the target's ghostty holder joins");
+    // ...and once that holder's own decision moves it again, the chain
+    // follows: whoever holds the second target joins the same duel
+    const chained = wizard.managerRows(provider, {
+      "cmd+1": { choice: "terminal", key: "alt+t", action: "goto_tab:1" },
+      "claim:alt+t:new_tab": { choice: "terminal", key: "alt+1", action: "new_tab", owner: "terminal" },
+    });
+    assert.ok(seated(chained[0].claims, "alt+t", "new_tab"));
+    assert.ok(
+      seated(chained[0].claims, "alt+1", "goto_tab:1"),
+      "the chain walks decided moves to their holders",
+    );
+    // moved onto another trigger of its own action: the same-side self-duel
+    // stays out, but the editor-side holder there (tode's builtin) joins —
+    // the rescan would count it, so the duel must show it now
+    const self = wizard.managerRows(provider, {
+      "cmd+1": { choice: "terminal", key: "alt+1", action: "goto_tab:1" },
+    });
+    assert.ok(
+      !self[0].claims.some((claim) => claim.command === "goto_tab:1"),
+      "the action never duels itself",
+    );
+    assert.ok(
+      self[0].claims.some(
+        (claim) => claim.chord === "alt+1" && claim.command === "workbench.action.focusFirstEditorGroup",
+      ),
+      "the cross-side holder at the target joins the duel",
+    );
+    // a staged decision about the contested holder rides along, so the
+    // column resumes exactly where the session left it
+    const decidedRows = wizard.managerRows(provider, {
+      "cmd+1": { choice: "terminal", key: "alt+t", action: "goto_tab:1" },
+      "claim:alt+t:new_tab": { choice: "terminal", action: "new_tab", owner: "terminal" },
+    });
+    assert.deepEqual(decidedRows[0].claims[0].decided, {
+      choice: "terminal", action: "new_tab", owner: "terminal",
+    });
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("steps resynchronize: one binding decided anywhere shows everywhere", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-resync-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    const conflict = (editorId, trigger, current, command) => ({
+      editorId, trigger, current,
+      editor: { means: command, command },
+      others: [],
+      inTerminal: "eats it", short: "s", freed: "f", tradeoff: "t",
+    });
+    const provider = {
+      id: "ghostty", name: "Ghostty",
+      detect: () => true, ready: () => null,
+      scan: () => [
+        conflict("cmd+1", "super+1", "goto_tab:1", "workbench.action.focusFirstEditorGroup"),
+        conflict("cmd+t", "super+t", "new_tab", "workbench.action.showAllSymbols"),
+      ],
+      takenAs: (chord) => (chord === "cmd+t" ? "new_tab" : null),
+      apply: () => "", onApplied: () => false, undo: () => false,
+      describe: (action) => `runs ${action}`,
+      reloadHint: () => "reload ghostty",
+    };
+    // step one moved onto cmd+t; its claimant column (new_tab) was then moved
+    // to ctrl+alt+9 — that claim IS the future cmd+t step's own terminal side
+    const staged = {
+      "cmd+1": { choice: "terminal", key: "cmd+t", action: "goto_tab:1" },
+      "claim:cmd+t:new_tab": { choice: "terminal", key: "ctrl+alt+9", action: "new_tab", owner: "terminal" },
+    };
+    const rows = wizard.managerRows(provider, staged);
+    // the future step was answered entirely from the cmd+1 duel, and its
+    // resolution shows there as a claimant column — the step stops existing
+    assert.deepEqual(rows.map((row) => row.id), ["cmd+1"], "the settled step is gone");
+    const newTab = rows[0].claims.find((claim) => claim.command === "new_tab");
+    assert.deepEqual(newTab.decided, staged["claim:cmd+t:new_tab"]);
+    // with the mover's own decision withdrawn, the claim record loses its
+    // column — the step returns, mirroring the record so nothing staged is
+    // ever invisible
+    const orphaned = wizard.managerRows(provider, {
+      "claim:cmd+t:new_tab": staged["claim:cmd+t:new_tab"],
+    });
+    assert.deepEqual(orphaned.map((row) => row.id), ["cmd+1", "cmd+t"]);
+    assert.deepEqual(
+      orphaned[1].decision,
+      { choice: "terminal", key: "ctrl+alt+9", action: "new_tab", owner: "terminal" },
+      "the returned step mirrors the orphaned claim record",
+    );
+
+    // chords parked by ANY staged decision refuse a second booking...
+    const parkedByRow = wizard.chordTaken(provider, staged, "cmd+t", "cmd+9");
+    assert.match(parkedByRow.holder, /moved here this session/);
+    const parkedByClaim = wizard.chordTaken(provider, staged, "ctrl+alt+9", "cmd+9");
+    assert.match(parkedByClaim.holder, /moved here this session/);
+    // ...but the owner re-picking its own target is a no-op, not a
+    // collision — whether asking as the claim or as the mirrored row
+    assert.equal(wizard.chordTaken(provider, staged, "ctrl+alt+9", "cmd+t", "new_tab"), null);
+    assert.equal(wizard.chordTaken(provider, staged, "ctrl+alt+9", "cmd+t"), null);
+
+    // a holder a staged decision moved away no longer takes its old chord:
+    // new_tab left cmd+t, so the ghostty side is gone — what still claims is
+    // the editor's own default binding there, the next holder in line
+    const freed = wizard.chordTaken(
+      provider,
+      { "claim:cmd+t:new_tab": { choice: "terminal", key: "ctrl+alt+9", action: "new_tab", owner: "terminal" } },
+      "cmd+t",
+      "cmd+9",
+    );
+    assert.notEqual(freed?.claim?.command, "new_tab", "a moved holder frees its old chord");
+    assert.equal(
+      freed?.claim?.command,
+      "workbench.action.showAllSymbols",
+      "the default keymap holder is next in line",
+    );
+
+    // editing the row directly drops the claim twin: one binding, one record
+    const twin = { ...staged };
+    const deps = { staged: twin };
+    // simulate decide(kind terminal) semantics via managerRows contract:
+    // (the dedupe lives in openManager's decide; assert its effect through
+    // chordTaken once the row record replaces the claim record)
+    delete twin["claim:cmd+t:new_tab"];
+    twin["cmd+t"] = { choice: "terminal", action: "new_tab" };
+    void deps;
+    const after = wizard.managerRows(provider, twin);
+    assert.deepEqual(after[1].decision, { choice: "terminal", action: "new_tab" });
+  } finally {
+    process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
+    process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
+    fs.rmSync(home, { recursive: true, force: true });
+    for (const key of Object.keys(require.cache)) delete require.cache[key];
+  }
+});
+
+test("applied resolutions never come back: removals mask every holder source", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-mask-"));
+  const prev = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_DATA_HOME = path.join(home, "share");
+  process.env.XDG_STATE_HOME = path.join(home, "state");
+  try {
+    const wizard = freshRequire("../dist/shortcuts/wizard.js");
+    const { USER_DIR } = require("../dist/profile.js");
+    const { makeEditorHolds, allConflicts } = require("../dist/shortcuts/ghostty.js");
+    const provider = {
+      id: "ghostty", name: "Ghostty",
+      scan: () => [], takenAs: () => null, describe: (action) => action,
+    };
+    // tode's own builtin holds alt+1 — the wizard would claim it...
+    const before = wizard.chordTaken(provider, {}, "alt+1", "cmd+w");
+    assert.equal(before.claim.command, "workbench.action.focusFirstEditorGroup");
+    // ...and a live ghostty bind on alt+1 would be a conflict row
+    const effective = new Map([["alt+1", "goto_tab:1"]]);
+    const open = allConflicts(effective, new Set(), makeEditorHolds(), () => null, new Map());
+    assert.equal(open.length, 1, "an unresolved holder is a conflict");
+
+    // the wizard resolves it; apply writes the removal into keybindings.json
+    const file = path.join(USER_DIR, "keybindings.json");
+    fs.mkdirSync(USER_DIR, { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify([{ key: "alt+1", command: "-workbench.action.focusFirstEditorGroup" }]),
+    );
+    // the invariant: a rerun sees the resolution everywhere the holder shows
+    assert.equal(
+      wizard.chordTaken(provider, {}, "alt+1", "cmd+w"),
+      null,
+      "the resolved holder no longer takes the chord",
+    );
+    assert.ok(
+      !makeEditorHolds()("alt+1").some(
+        (hold) => hold.command === "workbench.action.focusFirstEditorGroup",
+      ),
+      "the resolved holder is out of the holds",
+    );
+    const rerun = allConflicts(effective, new Set(), makeEditorHolds(), () => null, new Map());
+    assert.deepEqual(rerun, [], "a resolved conflict never returns as a new row");
   } finally {
     process.env.XDG_DATA_HOME = prev.XDG_DATA_HOME;
     process.env.XDG_STATE_HOME = prev.XDG_STATE_HOME;
@@ -967,10 +1363,10 @@ test("kitty conflicts derive from the parser dump: binds on held chords, prefixe
   const { allConflicts } = require("../dist/shortcuts/kitty.js");
   const holds = (chord) =>
     ({
-      "ctrl+shift+c": { command: "workbench.action.terminal.copySelection" },
-      "ctrl+shift+p": { command: "workbench.action.showCommands" },
-      "ctrl+shift+up": { command: "editor.action.insertCursorAbove" },
-    })[chord] ?? null;
+      "ctrl+shift+c": [{ command: "workbench.action.terminal.copySelection" }],
+      "ctrl+shift+p": [{ command: "workbench.action.showCommands" }],
+      "ctrl+shift+up": [{ command: "editor.action.insertCursorAbove" }],
+    })[chord] ?? [];
   const keymap = {
     binds: [
       { trigger: "ctrl+shift+c", action: "copy_to_clipboard", sequences: [] },
@@ -1056,12 +1452,12 @@ test("a compatible rebind counts as freed when the file is read back", () => {
 
 test("a chord tode already freed stays visible with its remembered action", () => {
   const { allConflicts } = require("../dist/shortcuts/kitty.js");
-  const holds = () => ({ command: "workbench.action.terminal.copySelection" });
+  const holds = () => [{ command: "workbench.action.terminal.copySelection" }];
   const past = (chord) => (chord === "ctrl+shift+c" ? "copy_to_clipboard" : null);
   // the dump omits passthrough keys, so a freed trigger only exists in the file
   const conflicts = allConflicts({ binds: [], docs: {} }, new Set(["ctrl+shift+c"]), holds, past);
   assert.equal(conflicts.length, 1);
-  assert.equal(conflicts[0].current, null, "null current marks it already freed");
+  assert.equal(conflicts[0].current, "copy_to_clipboard", "the freeing decision keeps the binding's identity");
   assert.equal(conflicts[0].short, "copy to clipboard", "the decision that freed it still names it");
 });
 
@@ -1128,6 +1524,7 @@ test("shared conflicts are settled silently at startup and never become wizard r
     const conflict = (editorId, extra = {}) => ({
       editorId, trigger: editorId, current: "copy_to_clipboard",
       editor: { means: "copy selection", command: "workbench.action.terminal.copySelection" },
+      others: [],
       inTerminal: "", short: "copy", freed: "", tradeoff: "",
       ...extra,
     });

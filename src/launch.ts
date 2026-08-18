@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";
 
 import { writeBrowserScripts } from "./browserglue";
@@ -13,15 +14,7 @@ export interface LaunchOptions {
   stages?: [string, number][];
 }
 
-/**
- * extremly odd how we pass these flags for sure
- */
-export function launchBrowser(
-  runtime: Runtime,
-  url: string,
-  palette: TerminalPalette,
-  options: LaunchOptions = {},
-): Promise<number> {
+function browserArgv(runtime: Runtime, url: string, options: LaunchOptions): string[] {
   const flags = supportedFlags(runtime);
   // --chromeless was the pre-app-mode spelling, kept for override binaries
   const argv = [url, flags.has("--app-mode") ? "--app-mode" : "--chromeless"];
@@ -42,19 +35,61 @@ export function launchBrowser(
   }
   if (options.split) argv.push("--split", options.split);
   if (options.size) argv.push("--size", options.size);
+  return argv;
+}
 
-  try {
-    fs.writeFileSync(
-      `${CSS_FILE}.launch.json`,
-      JSON.stringify({ spawnedAt: Date.now(), stages: options.stages ?? [] }),
-    );
-  } catch {}
-  const child = spawn(runtime.bin, ["open", ...argv], { stdio: "inherit" });
+/** One browser child that outlives several local pages. The first screen
+ * spawns it — with the full editor flag set, so it is already the editor's
+ * browser — and every later screen arrives as a navigation the page performs
+ * itself. The pane never respawns, so the terminal never drops back to its
+ * primary buffer between screens. */
+export class Pane {
+  private child: ChildProcess | null = null;
+  private exit: Promise<number> | null = null;
 
-  return new Promise<number>((resolve, reject) => {
-    child.on("error", (error) => {
-      reject(new Error(`could not start terminal-browser: ${error.message}`));
+  constructor(
+    private readonly runtime: Runtime,
+    private readonly options: LaunchOptions = {},
+  ) {}
+
+  owned(): boolean {
+    return this.child !== null;
+  }
+
+  open(url: string): void {
+    if (this.child) return;
+    try {
+      fs.writeFileSync(
+        `${CSS_FILE}.launch.json`,
+        JSON.stringify({ spawnedAt: Date.now(), stages: this.options.stages ?? [] }),
+      );
+    } catch {}
+    const child = spawn(this.runtime.bin, ["open", ...browserArgv(this.runtime, url, this.options)], {
+      stdio: "inherit",
     });
-    child.on("exit", (code) => resolve(code ?? 0));
-  });
+    this.child = child;
+    this.exit = new Promise<number>((resolve) => {
+      child.on("error", (error) => {
+        process.stderr.write(`could not start terminal-browser: ${error.message}\n`);
+        resolve(1);
+      });
+      child.on("exit", (code) => resolve(code ?? 0));
+    });
+  }
+
+  /** Resolves when the pane's browser exits; pends forever before open(). */
+  exited(): Promise<number> {
+    return this.exit ?? new Promise<number>(() => {});
+  }
+}
+
+export function launchBrowser(
+  runtime: Runtime,
+  url: string,
+  _palette: TerminalPalette,
+  options: LaunchOptions = {},
+): Promise<number> {
+  const pane = new Pane(runtime, options);
+  pane.open(url);
+  return pane.exited();
 }

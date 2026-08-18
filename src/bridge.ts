@@ -36,7 +36,7 @@ function manifest(): unknown {
       : [{ command: "tode.quitHint", key: "ctrl+c", when: hintWhen() }];
   return {
     name: "tode-bridge",
-    displayName: "tode",
+    displayName: "terminal-code",
     publisher: "tode",
     version: BRIDGE_VERSION,
     engines: { vscode: "^1.80.0" },
@@ -51,7 +51,7 @@ function manifest(): unknown {
       // command palette, so only the one deliberate action is declared:
       // confirmQuit (the ctrl+c reflex) and quitHint (the redirect toast) are
       // keybinding targets, and a palette full of quit flavours reads as noise
-      commands: [{ command: "tode.quit", title: "Quit", category: "tode" }],
+      commands: [{ command: "tode.quit", title: "Quit", category: "terminal-code" }],
       keybindings: [quitBinding, ...hintBinding],
     },
   };
@@ -68,11 +68,11 @@ function manifest(): unknown {
 export function quitHintMessage(): string {
   const choices = loadDecisions()?.choices ?? {};
   const decision = choices[IMPORT_DECISION_ID] ?? choices[QUIT_CHORD];
-  if (decision?.choice === "editor" && decision.key) return `Press ${decision.key} to quit tode`;
+  if (decision?.choice === "editor" && decision.key) return `Press ${decision.key} to quit terminal-code`;
   if (decision?.choice === "keep") {
-    return `${QUIT_CHORD} is taken — quit tode from the command palette, or run: tode shortcuts`;
+    return `${QUIT_CHORD} is taken — quit terminal-code from the command palette, or run: tode shortcut-setup`;
   }
-  return `Press ${QUIT_CHORD} to quit tode`;
+  return `Press ${QUIT_CHORD} to quit terminal-code`;
 }
 
 function extensionSource(
@@ -340,7 +340,7 @@ function activate(context) {
     vscode.commands.registerCommand("tode.confirmQuit", function () {
       if (confirmShowing) return;
       confirmShowing = true;
-      vscode.window.showErrorMessage("Do you want to quit tode?", { modal: true }, "Quit").then(
+      vscode.window.showErrorMessage("Do you want to quit terminal-code?", { modal: true }, "Quit").then(
         function (picked) {
           confirmShowing = false;
           if (picked === "Quit") quitTode();

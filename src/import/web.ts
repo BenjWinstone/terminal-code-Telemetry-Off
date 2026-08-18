@@ -25,6 +25,9 @@ export interface ImportPageDeps {
   editors: ImportPageEditor[];
   /** Runs the actual import; returns the rows the page shows as the receipt. */
   run(name: string): ImportReportRow[];
+  /** During onboarding: the url the page should navigate to when it is done,
+   * so the pane never respawns between screens. Absent, done just closes. */
+  next?(): Promise<string | null>;
 }
 
 function iconDataUri(png: string | null | undefined): string | null {
@@ -82,7 +85,8 @@ export function startImportPage(
         return ok({ ok: true, rows: deps.run(name) });
       }
       if (request.url === "/done") {
-        ok({ ok: true });
+        const next = deps.next ? await deps.next() : null;
+        ok({ ok: true, next });
         finish();
         return;
       }

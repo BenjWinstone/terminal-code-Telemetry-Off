@@ -5,7 +5,6 @@
   color: var(--dim); background: none; border: 1px solid var(--line);
 }
 .editor img { width: 18px; height: 18px; }
-.editor .spacer { width: 18px; height: 18px; }
 .editor.active { color: var(--fg); border-color: var(--soft); background: var(--lift); }
 .editor:focus { outline: none; }
 .report { margin-top: 1.6rem; display: flex; flex-direction: column; gap: .35rem; }

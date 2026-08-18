@@ -1,0 +1,142 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import readline from "node:readline";
+import { spawn } from "node:child_process";
+
+import { stopServer } from "./codeserver/server";
+import { FONT_ASSET, assetPath, userFontsDir } from "./profile";
+import {
+  CACHE_DIR,
+  DATA_DIR,
+  DEFAULT_INSTALL_ROOT,
+  INSTALL_ROOT,
+  RUNTIME_DIR,
+  STATE_DIR,
+  VENDOR_DIR,
+} from "./runtime/paths";
+import { PINNED_VERSION } from "./runtime/release";
+import { ghosttyConfigDir, reloadGhostty, removeFreed } from "./shortcuts/ghostty";
+
+/** Everything tode ever wrote, removed. The inverse of installing and using
+ * it: the shortcut overrides come out of the terminal's config, the font out
+ * of the user's fonts, the data/state/cache homes go whole, and a versioned
+ * install tree removes itself. A git checkout never removes itself — release
+ * trees carry a VERSION file and the checkout does not, and that file is the
+ * gate. */
+
+function confirm(question: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const ask = readline.createInterface({ input: process.stdin, output: process.stdout });
+    ask.question(question, (answer) => {
+      ask.close();
+      resolve(/^y(es)?$/i.test(answer.trim()));
+    });
+  });
+}
+
+/** A terminal-browser tree that is already on disk, for a best-effort daemon
+ * shutdown. Uninstalling must never download one just to shut it down. */
+function localBrowserBin(): string | null {
+  const candidates = [
+    path.join(VENDOR_DIR, "terminal-browser", "bin", "terminal-browser"),
+    path.join(RUNTIME_DIR, "terminal-browser", PINNED_VERSION, "bin", "terminal-browser"),
+  ];
+  return candidates.find((bin) => fs.existsSync(bin)) ?? null;
+}
+
+function removeDir(dir: string): boolean {
+  if (!fs.existsSync(dir)) return false;
+  fs.rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
+/** The bundled font, but only when the installed file is byte-for-byte the one
+ * tode ships — a font the user put there themselves stays. */
+function removeFont(): boolean {
+  const target = path.join(userFontsDir(), FONT_ASSET);
+  try {
+    const theirs = fs.readFileSync(target);
+    const ours = fs.readFileSync(assetPath(FONT_ASSET));
+    if (!theirs.equals(ours)) return false;
+    fs.rmSync(target, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The ~/.local/bin shim, but only when it is recognisably tode's own. */
+function removeShim(): boolean {
+  const binHome =
+    process.env.XDG_BIN_HOME && path.isAbsolute(process.env.XDG_BIN_HOME)
+      ? process.env.XDG_BIN_HOME
+      : path.join(os.homedir(), ".local", "bin");
+  const shim = path.join(binHome, "tode");
+  try {
+    const contents = fs.readFileSync(shim, "utf8");
+    if (!contents.includes("TODE_INSTALL_ROOT")) return false;
+    fs.rmSync(shim, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** One line, redrawn in place; a removal takes seconds and silence reads as a
+ * hang. No spinner without a tty. */
+function spinner(label: string): () => void {
+  if (!process.stdout.isTTY) return () => {};
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let at = 0;
+  const timer = setInterval(() => {
+    process.stdout.write(`\r${frames[at++ % frames.length]} ${label}`);
+  }, 80);
+  return () => {
+    clearInterval(timer);
+    process.stdout.write("\r\x1b[K");
+  };
+}
+
+export async function uninstallCommand(args: string[]): Promise<number> {
+  const yes = args.includes("--yes") || args.includes("-y");
+  if (!yes) {
+    if (!process.stdin.isTTY) {
+      process.stderr.write("pass --yes to uninstall without a prompt\n");
+      return 1;
+    }
+    if (!(await confirm("Uninstall terminal-code? [y/N] "))) return 0;
+  }
+
+  const stop = spinner("uninstalling");
+
+  // stop what is running, so nothing rewrites a directory mid-removal
+  stopServer();
+  const browser = localBrowserBin();
+  if (browser) {
+    await new Promise<void>((resolve) => {
+      const child = spawn(browser, ["shutdown"], { stdio: "ignore" });
+      child.on("error", () => resolve());
+      child.on("exit", () => resolve());
+    });
+  }
+
+  // the one thing tode wrote outside its own homes besides the font: the
+  // keybind overrides and their include line in the terminal's config
+  if (removeFreed(ghosttyConfigDir())) reloadGhostty();
+
+  removeFont();
+
+  for (const dir of [DATA_DIR, STATE_DIR, CACHE_DIR]) removeDir(dir);
+
+  // versioned trees only: the checkout someone develops in has no VERSION
+  // file and must never delete itself
+  for (const root of new Set([INSTALL_ROOT, DEFAULT_INSTALL_ROOT])) {
+    if (fs.existsSync(path.join(root, "VERSION"))) removeDir(root);
+  }
+  removeShim();
+
+  stop();
+  process.stdout.write("done\n");
+  return 0;
+}

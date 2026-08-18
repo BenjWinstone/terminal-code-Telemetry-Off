@@ -15,6 +15,10 @@ export interface Decision {
   action?: string;
   /** For a claimant move: the binding's original when clause, carried along. */
   guard?: string;
+  /** For a claimant move: who holds the chord. Absent means an editor-side
+   * holder resolved through keybindings.json; "terminal" means the terminal
+   * itself, resolved through the provider's freed file instead. */
+  owner?: "terminal";
   /** For an editor move: the editor command the new chord should run, staged
    * from the conflict when the decision was made. */
   command?: string;
@@ -27,6 +31,15 @@ export interface Decisions {
 }
 
 const DECISIONS_FILE = path.join(DATA_DIR, "shortcuts.json");
+
+/** The decision file's mtime, for cache keys that must react to an apply. */
+export function decisionsStamp(): number {
+  try {
+    return fs.statSync(DECISIONS_FILE).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
 
 export function loadDecisions(): Decisions | null {
   try {
@@ -74,8 +87,15 @@ export function claimBindings(): { key: string; command: string; when?: string }
   const out: { key: string; command: string; when?: string }[] = [];
   for (const [id, decision] of Object.entries(choices)) {
     if (!id.startsWith("claim:")) continue;
+    // a terminal-held claim resolves through the provider's freed file, not
+    // through keybindings.json
+    if (decision.owner === "terminal") continue;
     if (decision.choice !== "terminal" || !decision.action) continue;
-    const chord = id.slice("claim:".length);
+    // the id may name the claim's command after a second colon, so two
+    // claimants on one chord never collide
+    const rest = id.slice("claim:".length);
+    const named = rest.indexOf(":");
+    const chord = named === -1 ? rest : rest.slice(0, named);
     out.push({ key: chord, command: `-${decision.action}` });
     if (decision.key) out.push({ key: decision.key, command: decision.action, when: decision.guard });
   }
@@ -123,14 +143,20 @@ export function carvedWhen(base: string | undefined, chord: string): string | un
 }
 
 /** The guard on tode's own quit binding. On macOS the quit chord doubles as
- * the reflex ctrl+c, so it also carries the hint's contexts. */
+ * the reflex ctrl+c, so it also carries the hint's contexts.
+ *
+ * Deliberately never carved for extension claims: quitting must always work,
+ * and an extension's guard can cover every one of its modes (vim's does), so
+ * yielding automatically can leave no context where quit fires at all. An
+ * extension gets the quit chord only through an explicit wizard decision. */
 export function quitWhen(): string {
-  return carvedWhen(QUIT_CHORD === "ctrl+c" ? HINT_BASE : "!terminalFocus", QUIT_CHORD)!;
+  return QUIT_CHORD === "ctrl+c" ? HINT_BASE : "!terminalFocus";
 }
 
-/** The guard on the ctrl+c redirect hint, where ctrl+c is not itself quit. */
+/** The guard on the ctrl+c redirect hint, where ctrl+c is not itself quit —
+ * uncarved for the same reason quit is. */
 export function hintWhen(): string {
-  return carvedWhen(HINT_BASE, "ctrl+c")!;
+  return HINT_BASE;
 }
 
 /** The redirect hint exists only where ctrl+c is not itself the quit chord

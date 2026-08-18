@@ -34,6 +34,9 @@ export function preloadMain(ctx: PreloadCtx): void {
       for (const mark of performance.getEntriesByType("mark")) {
         if (mark.name.startsWith("code/")) marks[mark.name] = Math.round(mark.startTime);
       }
+      // onboarding pages share this preload but are not the workbench; with
+      // no marks at all there is no story to write down
+      if (Object.keys(marks).length === 0) return;
       const message: TimingMessage = {
         type: "timing",
         page: {

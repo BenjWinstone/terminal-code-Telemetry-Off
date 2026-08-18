@@ -205,7 +205,7 @@ test("managed settings always win, even over an import", () => {
   const { applySettings } = require("../dist/profile.js");
   const { readKey } = require("../dist/jsonc.js");
   const out = applySettings(`{"workbench.colorTheme": "Monokai", "editor.tabSize": 8}`);
-  assert.equal(readKey(out, "workbench.colorTheme"), "Tode Terminal");
+  assert.equal(readKey(out, "workbench.colorTheme"), "Terminal Code");
   assert.equal(readKey(out, "editor.tabSize"), 8);
 });
 
@@ -283,7 +283,7 @@ test("the bridge maps quit per platform, always behind a confirm", () => {
 
     const command = pkg.contributes.commands[0];
     assert.equal(command.command, "tode.quit");
-    assert.equal(`${command.category}: ${command.title}`, "tode: Quit");
+    assert.equal(`${command.category}: ${command.title}`, "terminal-code: Quit");
 
     // "*" is rejected for an extension that ships code, and it fails silently
     assert.notEqual(pkg.engines.vscode, "*");
@@ -293,7 +293,7 @@ test("the bridge maps quit per platform, always behind a confirm", () => {
     assert.match(source, /registerCommand\("tode\.quit"/);
     assert.match(source, /registerCommand\("tode\.confirmQuit"/);
     assert.match(source, /registerCommand\("tode\.quitHint"/);
-    assert.match(source, /"Do you want to quit tode\?", \{ modal: true \}, "Quit"/, "quit confirms before acting");
+    assert.match(source, /"Do you want to quit terminal-code\?", \{ modal: true \}, "Quit"/, "quit confirms before acting");
     assert.match(source, /showErrorMessage\(QUIT_HINT, \{ modal: true \}\)/, "the hint is a modal, not a corner toast");
     assert.match(source, /vscodevim\.vim/, "the vim quit watch rides along");
     assert.match(source, /onDidChangeTabs/);

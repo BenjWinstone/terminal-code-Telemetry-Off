@@ -11,7 +11,14 @@ main { text-align: center; }
 /* the confirm table is tall — the vertical centering that suits a single
    duel would push it off the bottom instead */
 main.confirm { padding-top: 1.2rem; }
-.duel { display: flex; gap: 3.5rem; justify-content: center; flex-wrap: wrap; }
+/* the duel as a whole reserves the height one full column needs, so the
+   verdict and the arrows never move between steps — the captions themselves
+   size to content, and a claimant row that wraps sits at a normal gap
+   instead of below every column's worst-case reservation */
+.duel {
+  display: flex; gap: 2rem 3.5rem; justify-content: center; flex-wrap: wrap;
+  align-items: flex-start; min-height: 19em;
+}
 .app { display: flex; flex-direction: column; align-items: center; width: 15rem; }
 .name {
   display: flex; align-items: center; gap: .45rem;
@@ -58,25 +65,14 @@ main.confirm { padding-top: 1.2rem; }
 /* .app centers its children, which shrink-wraps them — the caption must
    span the column so its table gets the chord box's exact width */
 .caption { color: var(--dim); margin-top: .5rem; min-height: 3.1em; width: 100%; }
-/* the caption reserves the height a full table needs — description, a
-   wrapped command id, a wrapped guard — so steps rarely shift; it is a
-   minimum, never a clip, so nothing ever truncates */
-.duel-block .caption { min-height: 13em; }
-/* the label column is sized by "description", which every table has, so the
-   columns sit in the same place on every step whatever the values hold */
+/* each entry stacks label over value — no borders, no fills, no columns;
+   the vertical rhythm alone is the table */
 .caption .detail {
-  display: grid; grid-template-columns: max-content 1fr;
-  margin-top: .4rem; font-size: 11px; text-align: left;
-  border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: .55rem;
+  margin-top: .5rem; font-size: 11px; text-align: left;
 }
-.caption .detail > div { padding: .25rem .5rem; }
-/* each pair of cells is one row; every row after the first gets a rule */
-.caption .detail > div:nth-child(n+3) { border-top: 1px solid var(--line); }
-.caption .detail .k {
-  color: var(--faint);
-  background: var(--lift); border-right: 1px solid var(--line);
-}
-.caption .detail .v { color: var(--dim); overflow-wrap: anywhere; }
+.caption .detail .k { color: var(--faint); }
+.caption .detail .v { color: var(--dim); overflow-wrap: break-word; margin-top: .1rem; }
 .tipwrap.ghost { visibility: hidden; }
 .verdict { margin: 1.6rem 0 0; min-height: 1.6em; }
 .verdict.bad { color: var(--red); }
@@ -102,20 +98,15 @@ main.confirm { padding-top: 1.2rem; }
   border: 1px solid var(--line); cursor: pointer;
 }
 .option:hover { background: var(--lift); }
-.option:focus { outline: none; border-color: var(--soft); background: var(--lift); }
+/* focus is a border, not a fill: an auto-focused modal button must not read
+   as a highlighted choice */
+.option:focus { outline: none; border-color: var(--soft); }
 .chip {
   display: inline-flex; align-items: center; gap: .35rem;
   padding: .05rem .45rem; border: 1px solid var(--line);
   background: color-mix(in srgb, var(--fg) 6%, var(--bg));
 }
 .chip img { width: 13px; height: 13px; }
-/* on a primary button the chip sits on the inverted fill, so its dark-page
-   colours flip with it — otherwise its label lands dark-on-dark */
-.option.primary .chip {
-  border-color: color-mix(in srgb, var(--bg) 35%, var(--fg));
-  background: color-mix(in srgb, var(--bg) 8%, var(--fg));
-  color: var(--bg);
-}
 .final {
   display: grid;
   gap: .55rem 1rem; align-items: center; margin-top: 1.4rem;
@@ -125,8 +116,25 @@ main.confirm { padding-top: 1.2rem; }
 .f-head img { width: 14px; height: 14px; }
 .f-chord { font-weight: 600; text-align: left; }
 
+/* the capture box as a text input: same chrome, centred, quiet placeholder */
+input.manualentry { text-align: center; background: none; }
+input.manualentry:focus { outline: none; border-color: var(--soft); }
+input.manualentry::placeholder { color: var(--faint); }
+/* the way out of a capture the terminal is eating: offered after five silent
+   seconds, floated below the box like the menu so nothing shifts */
+.manualoffer {
+  position: absolute; top: calc(100% + .35rem); left: 0; right: 0; z-index: 5;
+  padding: .35rem .6rem; font: inherit; color: var(--faint);
+  background: var(--bg); border: 1px dashed var(--line); cursor: pointer;
+}
+.manualoffer:hover { color: var(--fg); border-color: var(--dim); }
+
 .box.mini { padding: .4rem 1.6rem; border-width: 1.5px; font-weight: 500; }
 .box.mini .pen { left: .4rem; }
+.confirmnav { display: flex; gap: .8rem; align-items: center; justify-content: center; }
+/* the way back sits beside apply with the same chrome, quieter text */
+.go.quiet { color: var(--dim); }
+.go.quiet:hover, .go.quiet:focus { color: var(--fg); }
 .go {
   margin-top: 1.6rem; padding: .6rem 1.8rem; font: inherit;
   display: inline-flex; align-items: center; gap: .5rem;
@@ -155,7 +163,8 @@ main.confirm { padding-top: 1.2rem; }
 .option.primary:hover { opacity: .88; background: var(--fg); }
 .actions.split { justify-content: space-between; margin-top: 1.3rem; }
 .actions.split .option { flex: 0 0 auto; padding: .5rem 1.2rem; }
-.option.danger { border-color: transparent; color: var(--red); }
+/* the same chrome as every option — only the text says danger */
+.option.danger { color: var(--red); }
 .option.danger:hover { background: color-mix(in srgb, var(--red) 12%, var(--bg)); }
 .modal .x {
   position: absolute; top: .35rem; right: .45rem; padding: .15rem .45rem;
