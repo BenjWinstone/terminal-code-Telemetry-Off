@@ -112,28 +112,33 @@ test("the bridge applies the live theme on activation and again on every change,
   }
 });
 
-test("tode --review's marker focuses the scm view once, then burns", async () => {
+test("the startup marker replays views and diffs once, then burns", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-review-"));
   const prev = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = path.join(home, "share");
   for (const key of Object.keys(require.cache)) delete require.cache[key];
-  const { installBridge, requestStartupView, BRIDGE_DIR } = require("../dist/bridge.js");
+  const { installBridge, requestStartupOpen, BRIDGE_DIR } = require("../dist/bridge.js");
   try {
     installBridge(["/usr/local/bin/tode"]);
-    requestStartupView("scm");
+    // the parts of an open the workbench url cannot carry: a diff and a view
+    requestStartupOpen({ view: "scm", diff: ["/tmp/a.txt", "/tmp/b.txt"] });
     const source = fs.readFileSync(path.join(BRIDGE_DIR, "extension.js"), "utf8");
     const ran = [];
     const { extension } = loadBridgeSandbox(source, home, {
       commands: {
         registerCommand: () => ({ dispose() {} }),
-        executeCommand: (command) => ran.push(command),
+        executeCommand: (command, ...rest) => ran.push([command, ...rest.map(String)]),
       },
+      Uri: { file: (p) => ({ toString: () => `file://${p}` }) },
     });
     const context = { subscriptions: [], environmentVariableCollection: { replace() {} } };
     extension.activate(context);
     try {
-      assert.deepEqual(JSON.parse(JSON.stringify(ran)), ["workbench.view.scm"]);
-      const marker = path.join(process.env.XDG_DATA_HOME, "tode", "startup-view.json");
+      await new Promise((r) => setTimeout(r, 20));
+      const commands = JSON.parse(JSON.stringify(ran));
+      assert.deepEqual(commands[0], ["workbench.view.scm"]);
+      assert.deepEqual(commands[1], ["vscode.diff", "file:///tmp/a.txt", "file:///tmp/b.txt"]);
+      const marker = path.join(process.env.XDG_DATA_HOME, "tode", "startup-open.json");
       assert.ok(!fs.existsSync(marker), "the marker is one-shot");
     } finally {
       for (const sub of context.subscriptions) sub.dispose();

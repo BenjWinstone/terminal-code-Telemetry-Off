@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { BridgeCtx } from "./bridge/ctx";
 import { bridgeMain } from "./bridge/extension";
+import type { OpenRequest } from "./ipc";
 import { DATA_DIR } from "./runtime/paths";
 import { EXTENSIONS_DIR, LIVE_THEME_FILE } from "./profile";
 import {
@@ -17,10 +18,11 @@ import {
 const BRIDGE_ID = "tode.tode-bridge";
 const BRIDGE_VERSION = "1.5.1";
 
-export const STARTUP_VIEW_FILE = path.join(DATA_DIR, "startup-view.json");
-export function requestStartupView(view: string): void {
+export const STARTUP_OPEN_FILE = path.join(DATA_DIR, "startup-open.json");
+
+export function requestStartupOpen(request: Partial<OpenRequest>): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(STARTUP_VIEW_FILE, `${JSON.stringify({ view, at: Date.now() })}\n`);
+  fs.writeFileSync(STARTUP_OPEN_FILE, `${JSON.stringify({ ...request, at: Date.now() })}\n`);
 }
 export const BRIDGE_DIR = path.join(EXTENSIONS_DIR, `${BRIDGE_ID}-${BRIDGE_VERSION}`);
 
@@ -99,7 +101,7 @@ export function installBridge(tode: string[]): boolean {
       tode,
       liveThemeFile: LIVE_THEME_FILE,
       quitHint: quitHintMessage(),
-      startupViewFile: STARTUP_VIEW_FILE,
+      startupOpenFile: STARTUP_OPEN_FILE,
     }),
   );
   registerBridge();

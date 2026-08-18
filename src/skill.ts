@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { BRIDGE_DIR, STARTUP_VIEW_FILE } from "./bridge";
+import { BRIDGE_DIR, STARTUP_OPEN_FILE } from "./bridge";
 import { ipcSocketDir } from "./browserglue";
 import { CSS_FILE, PORT_FILE, STATE_FILE, currentServer, origin } from "./codeserver/server";
 import { CODE_SERVER_VERSION, codeServerRoot, installedCodeServer } from "./codeserver/vendored";
@@ -172,7 +172,7 @@ connect, send one JSON line, close. The shape:
 
 The tode CLI does this for you: inside a window, \`tode <file>\` opens there,
 \`tode -r <folder>\` replaces the workspace, \`--review\` focuses source control.
-${STARTUP_VIEW_FILE} is a one-shot marker the bridge consumes at startup.
+${STARTUP_OPEN_FILE} is a one-shot marker with the parts of an open the url cannot carry (gotos, diffs, a view to focus); the bridge replays it once at startup.
 
 ## Daemon and processes
 

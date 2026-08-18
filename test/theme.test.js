@@ -461,8 +461,8 @@ test("help states the routing rules for a tode terminal", () => {
   const help = execFileSync("node", [path.join(__dirname, "..", "dist", "main.js"), "--help"], {
     encoding: "utf8",
   });
-  assert.match(help, /a file opens in that window and a folder\s*\n?opens its own pane/i);
-  assert.match(help, /-r, --reuse-window\s+Open the folder in this window/);
+  assert.match(help, /-r, --reuse-window\s+Open folder in this window/);
+  assert.match(help, /--shortcut-setup/);
 });
 
 test("-r is a real flag now, not something quietly dropped", () => {

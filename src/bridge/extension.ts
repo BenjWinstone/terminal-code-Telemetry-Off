@@ -85,7 +85,7 @@ export function bridgeMain(ctx: BridgeCtx): void {
 
   const LIVE_THEME_FILE = ctx.liveThemeFile;
   const QUIT_HINT = ctx.quitHint;
-  const STARTUP_VIEW_FILE = ctx.startupViewFile;
+  const STARTUP_OPEN_FILE = ctx.startupOpenFile;
 
   const VIEW_COMMANDS: Record<string, string> = { scm: "workbench.view.scm" };
 
@@ -94,18 +94,18 @@ export function bridgeMain(ctx: BridgeCtx): void {
     if (command) void vscode.commands.executeCommand(command);
   }
 
-  function applyStartupView(): void {
-    let parsed: { at?: number; view?: string };
+  function applyStartupOpen(): void {
+    let parsed: (Partial<BridgeRequest> & { at?: number }) | null;
     try {
-      parsed = JSON.parse(fs.readFileSync(STARTUP_VIEW_FILE, "utf8"));
+      parsed = JSON.parse(fs.readFileSync(STARTUP_OPEN_FILE, "utf8"));
     } catch {
       return;
     }
     try {
-      fs.rmSync(STARTUP_VIEW_FILE, { force: true });
+      fs.rmSync(STARTUP_OPEN_FILE, { force: true });
     } catch {}
-    if (!parsed || Date.now() - (parsed.at || 0) > 120000 || !parsed.view) return;
-    focusView(parsed.view);
+    if (!parsed || Date.now() - (parsed.at || 0) > 120000) return;
+    void open({ files: [], folders: [], add: false, ...parsed, wait: false }, () => {});
   }
 
   const NL = String.fromCharCode(10);
@@ -307,7 +307,7 @@ export function bridgeMain(ctx: BridgeCtx): void {
     );
 
     // huh?
-    applyStartupView();
+    applyStartupOpen();
 
     const stopWatchingSettings = watchLiveTheme();
     context.subscriptions.push({ dispose: stopWatchingSettings });

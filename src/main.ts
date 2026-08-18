@@ -12,7 +12,7 @@ import {
   stopServer,
 } from "./codeserver/server";
 import { CODE_SERVER_VERSION, ensureCodeServer, narrateFetch } from "./codeserver/vendored";
-import { installBridge, requestStartupView } from "./bridge";
+import { installBridge, requestStartupOpen } from "./bridge";
 import { BOOT_AFTER_APPLY, autoApplyShared, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
 import { runOnboarding } from "./onboarding";
@@ -274,7 +274,18 @@ async function openCommand(args: string[]): Promise<number> {
     installKeybindings();
     const server = await ensureServer();
     done("code-server");
-    if (review) requestStartupView("scm");
+    // the url can carry one folder or one plain file; everything else the
+    // request asked for — gotos, extra files, a diff, a view — rides the
+    // one-shot marker, stamped last so its freshness window starts after
+    // any first-install download
+    const startupFiles = files.filter((file) => file.line !== undefined || file.path !== target.file);
+    if (review || startupFiles.length > 0 || pair.length > 0) {
+      requestStartupOpen({
+        ...(startupFiles.length > 0 ? { files: startupFiles } : {}),
+        ...(pair.length > 0 ? { diff: pair } : {}),
+        ...(review ? { view: "scm" } : {}),
+      });
+    }
     return workbenchUrl(origin(server), target);
   })());
 
