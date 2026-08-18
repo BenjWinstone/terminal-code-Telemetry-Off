@@ -10,10 +10,7 @@ import path from "node:path";
 
 import { BROWSER_HOME, RUNTIME_DIR, VENDOR_DIR } from "./paths";
 
-/** The terminal-browser build tode is written against. tode drives flags whose
- * behaviour is specific to this build, so it pins rather than taking whatever
- * happens to be installed. */
-export const PINNED_VERSION = "main-cfbefbf";
+export const PINNED_VERSION = "v0.5.7";
 
 const RELEASE_ORIGIN = process.env.TODE_RELEASE_ORIGIN ?? "https://terminal-browser.sh/install";
 
@@ -52,9 +49,6 @@ export interface Runtime {
   source: Source;
 }
 
-/** The pinned installer carries a per-platform table of download urls and their
- * hashes, so asking for one version is enough to fetch the right build and know
- * the bytes are the right ones. */
 export async function lookup(version: string): Promise<Release> {
   const url = `${RELEASE_ORIGIN}/v/${version}`;
   const response = await fetch(url);
@@ -147,8 +141,6 @@ export function unpack(tarball: string, root: string) {
   fs.renameSync(staging, root);
 }
 
-/** On APFS this clones rather than copies, so reusing an install the user already
- * has costs no download and almost no disk. */
 function cloneTree(from: string, to: string): boolean {
   const staging = `${to}.cloning`;
   fs.rmSync(staging, { recursive: true, force: true });
