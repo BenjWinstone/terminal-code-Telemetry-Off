@@ -4,7 +4,6 @@ import fs from "node:fs";
 
 import { writeBrowserScripts } from "./browserglue";
 import { CSS_FILE } from "./codeserver/server";
-import { supportedFlags } from "./runtime/release";
 import type { Runtime } from "./runtime/release";
 import type { TerminalPalette } from "./terminal/osc";
 
@@ -14,7 +13,7 @@ export interface LaunchOptions {
   stages?: [string, number][];
 }
 
-function browserArgv(runtime: Runtime, url: string, options: LaunchOptions): string[] {
+function browserArgv(url: string, options: LaunchOptions): string[] {
   const argv = [url, "--app-mode"]
   const scripts = writeBrowserScripts();
   argv.push(`--preload=${scripts.preload}`, `--main-script=${scripts.mainScript}`);
@@ -44,7 +43,7 @@ export class Pane {
         JSON.stringify({ spawnedAt: Date.now(), stages: this.options.stages ?? [] }),
       );
     } catch { }
-    const child = spawn(this.runtime.bin, ["open", ...browserArgv(this.runtime, url, this.options)], {
+    const child = spawn(this.runtime.bin, ["open", ...browserArgv(url, this.options)], {
       stdio: "inherit",
     });
     this.child = child;

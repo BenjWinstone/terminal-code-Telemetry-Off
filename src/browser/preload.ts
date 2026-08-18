@@ -3,12 +3,7 @@ import type { PreloadCtx, ThemeMessage, TimingMessage } from "./ctx";
 
 declare const terminalBrowser: TerminalBrowserApi;
 
-export function preloadMain(ctx: PreloadCtx): void {
-  // The terminalBrowser api is theme-only; anything bound for tode's main
-  // script rides electron's own ipc, since this preload and that script live
-  // in the one electron app. The channel name is tode's, so nothing collides
-  // with terminal-browser's channels — and it appears verbatim here and in
-  // mainscript.ts, because these functions serialize closure-free.
+export function preloadMain(_ctx: PreloadCtx): void {
   const { ipcRenderer } = require("electron") as {
     ipcRenderer: { send(channel: string, message: unknown): void };
   };
@@ -19,11 +14,6 @@ export function preloadMain(ctx: PreloadCtx): void {
     deliver(message);
   });
 
-  // The workbench's startup story, read from its own performance marks and
-  // sent once the workbench is up (or the wait times out); the main script
-  // writes it down so `tode timing` can print a breakdown without a debugger
-  // attached. Child frames share the preload but not the workbench, so only
-  // the top document takes part.
   if (window !== window.top) return;
   const send = () => {
     try {
@@ -34,8 +24,6 @@ export function preloadMain(ctx: PreloadCtx): void {
       for (const mark of performance.getEntriesByType("mark")) {
         if (mark.name.startsWith("code/")) marks[mark.name] = Math.round(mark.startTime);
       }
-      // onboarding pages share this preload but are not the workbench; with
-      // no marks at all there is no story to write down
       if (Object.keys(marks).length === 0) return;
       const message: TimingMessage = {
         type: "timing",

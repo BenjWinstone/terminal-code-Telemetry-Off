@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import type { TerminalPalette } from "../terminal/osc";
-import { contrast, fromOklch, hex, isDark, legible, mix, shade, toOklch, withAlpha } from "./color";
+import { contrast, hex, isDark, legible, mix, shade, toOklch, withAlpha } from "./color";
 import type { Rgb } from "./color";
 
 export const THEME_NAME = "Terminal Code";

@@ -55,7 +55,3 @@ const PROVIDERS: ShortcutProvider[] = [ghosttyProvider, kittyProvider];
 export function providerFor(env: NodeJS.ProcessEnv = process.env): ShortcutProvider | null {
   return PROVIDERS.find((provider) => provider.detect(env)) ?? null;
 }
-
-export function providerNames(): string[] {
-  return PROVIDERS.map((provider) => provider.name);
-}

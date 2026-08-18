@@ -21,7 +21,6 @@ import { parseGoto, runningWindow, sendToExtension } from "./ipc";
 import type { OpenFile } from "./ipc";
 import { EXTENSIONS_DIR, VSCODE_DIR, registerThemeExtension } from "./profile";
 import {
-  cachePalette,
   ensureFont,
   installCss,
   installKeybindings,

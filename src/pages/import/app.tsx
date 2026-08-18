@@ -1,12 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-/** The first-run import screen: one question, the editors found on this
- * machine, two buttons. Same tokens and same shape as the shortcuts intro —
- * it has to read as the same program. */
 
 interface Editor {
   name: string;
-  /** the app's icon as a data uri, when the machine has one */
   icon: string | null;
 }
 
@@ -25,18 +21,12 @@ const post = async (url: string, payload?: unknown) => {
   return response.json();
 };
 
-/**
- * interesting, a post request? and then an answer
- * suka suka, very interesting. i mean, you could technically use ipc here
- */
 const done = async () => {
   const answer = await post("/done");
   if (answer && answer.next) location.replace(answer.next);
 };
 
 export function App({ state }: { state: ImportState }) {
-  // icons first, both groups in detection order: an icon-less row also drops
-  // the icon's slot, and mixing the two shapes mid-list reads as ragged
   const editors = [
     ...state.editors.filter((editor) => editor.icon),
     ...state.editors.filter((editor) => !editor.icon),

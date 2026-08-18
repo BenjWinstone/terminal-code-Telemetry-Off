@@ -23,10 +23,6 @@ export function kittyBinary(): string | null {
   }
 }
 
-/** One key kitty holds, as kitty's own config parser resolved it: kitty_mod
- * expanded, aliases applied, later maps already overriding earlier ones.
- * `action` is null when the key only opens multi-key sequences — the first
- * press is consumed as a prefix even though no single action runs. */
 export interface KittyBind {
   trigger: string;
   action: string | null;
@@ -35,21 +31,9 @@ export interface KittyBind {
 
 export interface KittyKeymap {
   binds: KittyBind[];
-  /** Action name to kitty's own one-line description, from its action registry
-   * — the same text its documentation is generated from. */
   docs: Record<string, string>;
 }
 
-/** Runs inside kitty's python (`kitty +runpy`), so the keymap comes from the
- * exact parser the running terminal used: kitty_mod, includes, action aliases
- * and custom maps are all resolved by kitty, not re-implemented here. The
- * effective-definition selection mirrors kitty's own matching_key_actions:
- * a terminal (non-sequence) map last in the list wins alone; otherwise the
- * sequence maps after the last terminal one survive as prefixes.
- *
- * Everything lives inside main() because `kitty +runpy` execs the source with
- * the caller's frame as globals — names imported at top level are invisible
- * from nested scopes. */
 const DUMP_SCRIPT = `
 def main():
     import json
@@ -128,13 +112,9 @@ export function kittyConfigDir(): string {
   for (const dir of candidateConfigDirs()) {
     if (fs.existsSync(path.join(dir, "kitty.conf"))) return dir;
   }
-  // with no config anywhere, kitty itself would create one under XDG (or the
-  // override); the Preferences path is never the default it makes
   return candidateConfigDirs()[0];
 }
 
-/** Editor chord syntax to kitty trigger syntax: cmd is super, page keys grow
- * an underscore, everything else matches kitty's plain-character naming. */
 export function toTrigger(chord: string): string {
   return chord
     .split("+")
@@ -147,8 +127,6 @@ export function toTrigger(chord: string): string {
     .join("+");
 }
 
-/** kitty spellings the editor writes differently. Keys with no editor chord at
- * all (keypad, media, the bare plus key) map to null. */
 const TRIGGER_KEYS: Record<string, string | null> = {
   page_up: "pageup",
   page_down: "pagedown",
@@ -158,8 +136,6 @@ const TRIGGER_KEYS: Record<string, string | null> = {
   print_screen: null,
 };
 
-/** kitty trigger syntax back to editor chord syntax, or null when the trigger
- * has no editor spelling. */
 export function fromTrigger(trigger: string): string | null {
   const parts = trigger.split("+").map((part) => {
     if (part === "super" || part === "cmd" || part === "command") return "cmd";
@@ -177,18 +153,12 @@ const HEADER = "# written by tode shortcut-setup — frees the chords the editor
 export const INCLUDE_LINE = "include tode/keybinds.kitty.conf";
 const KEYBINDS_FILE = ["tode", "keybinds.kitty.conf"];
 
-/** A bare `map <trigger>` empties the definition, and because this file is
- * included last it is also the last definition kitty considers — its own
- * dispatch then hands the key to the program, sequences and all. */
 export function freedTriggers(configDir: string): Set<string> {
   try {
     const contents = fs.readFileSync(path.join(configDir, ...KEYBINDS_FILE), "utf8");
     const freed = new Set<string>();
     const compatible = new Set(Object.values(SHARED_REBINDS));
     for (const line of contents.split("\n")) {
-      // bare, or rebound to a compatible action — both mean the editor has
-      // the chord now; rebind targets (real kitty actions the user moved
-      // somewhere else) are not freed triggers
       const match = /^map\s+(\S+)(?:\s+(\S+))?\s*$/.exec(line.trim());
       if (match && (!match[2] || compatible.has(match[2]))) freed.add(match[1]);
     }
@@ -198,28 +168,13 @@ export function freedTriggers(configDir: string): Set<string> {
   }
 }
 
-/** Actions kitty itself refuses to consume when they cannot perform, verified
- * against kitty 0.45's window.py: the scroll family returns pass-through
- * whenever the program is on the alternate screen — which the editor pane
- * always is — and copy_or_noop passes through without a selection, which the
- * editor pane never gives kitty since it owns the mouse. None of these ever
- * stand between the editor and a key. */
 const HARMLESS_ACTION =
   /^(copy_or_noop|scroll_line_up|scroll_line_down|scroll_page_up|scroll_page_down|scroll_home|scroll_end|scroll_to_prompt|scroll_prompt_to_top|scroll_prompt_to_bottom)\b/;
 
-/** Actions with a compatible spelling: the replacement does the same thing
- * whenever kitty can act, and passes the chord through whenever it cannot.
- * Freeing these costs nothing, so the wizard presents an acknowledgement
- * rather than a choice. */
 const SHARED_REBINDS: Record<string, string> = {
   copy_to_clipboard: "copy_or_noop",
 };
 
-/** Completes moves whose action has a compatible spelling: the free becomes a
- * rebind to it rather than an unmap. The action is known both on a live free
- * (the scan's current) and on a re-apply (the decision kept it), so this is
- * the one place the rebind is decided — unless the user moved the action to
- * another chord, which keeps the plain unmap. */
 export function withSharedRebinds(moves: FreedMove[]): FreedMove[] {
   return moves.map((move) => {
     if (move.emit || move.to || !move.action) return move;
@@ -228,9 +183,6 @@ export function withSharedRebinds(moves: FreedMove[]): FreedMove[] {
   });
 }
 
-/** A sequence prefix has no single action to carry to another chord, so its
- * conflicts are freeable but not movable; the marker `current` starts with
- * this prefix and apply refuses to write it as a rebind. */
 const SEQUENCE_MARKER = "key sequence";
 
 function rebindable(action: string | undefined): action is string {
@@ -248,8 +200,6 @@ export function keybindsFileContents(moves: FreedMove[]): string {
 export function withInclude(config: string): string {
   if (config.split("\n").some((line) => line.trim() === INCLUDE_LINE)) return config;
   const separated = config.length > 0 && !config.endsWith("\n") ? `${config}\n` : config;
-  // appended, never inserted: kitty's later maps override earlier ones, and
-  // the frees only win by coming after everything the user wrote
   return `${separated}${INCLUDE_LINE}\n`;
 }
 
@@ -260,9 +210,6 @@ export function withoutInclude(config: string): string {
     .join("\n");
 }
 
-/** Makes `moves` exactly the set tode frees or moves — only the include file
- * and the one line that includes it are ever touched, and an empty set removes
- * both so nothing of ours is left. */
 export function writeFreed(configDir: string, moves: FreedMove[]): string {
   const keybindsFile = path.join(configDir, ...KEYBINDS_FILE);
   const configFile = path.join(configDir, "kitty.conf");
@@ -300,14 +247,10 @@ export function removeFreed(configDir: string): boolean {
   return changed;
 }
 
-/** What a freed trigger used to run. The live keymap no longer knows — the
- * free emptied it — but the decision that freed it kept the action. */
 function decidedAction(chord: string): string | null {
   return loadDecisions()?.choices[chord]?.action ?? null;
 }
 
-/** The label for an action string: the action's own name, and for a kitten the
- * kitten's name with it, since `kitten` alone says nothing. */
 function actionLabel(action: string): string {
   const tokens = action.split(/\s+/);
   return words(tokens[0] === "kitten" && tokens[1] ? `${tokens[0]}_${tokens[1]}` : tokens[0]);
@@ -317,10 +260,6 @@ function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
-/** Every conflict this terminal presents, derived live from kitty's own
- * parser: any bind that consumes a chord the editor holds, whether it came
- * from kitty's defaults, kitty_mod changes, or the user's own maps. New kitty
- * releases and custom keymaps surface here without anyone editing a table. */
 export function allConflicts(
   { binds, docs }: KittyKeymap,
   freed: Set<string>,
@@ -337,8 +276,6 @@ export function allConflicts(
     if (held.length === 0) return;
     const [primary, ...others] = held;
     seen.add(chord);
-    // bind is null for a trigger tode already freed; the decision that freed
-    // it remembers what it ran, so the texts can still name it
     const ran = bind ? bind.action : past(chord);
     const doing = ran
       ? actionLabel(ran)
@@ -346,15 +283,10 @@ export function allConflicts(
         ? `${bind.sequences.length} key sequences`
         : "what it ran before";
     const doc = ran ? docs[ran.split(/\s+/)[0]] : undefined;
-    // the binding's identity: what the trigger runs, or ran before a free —
-    // the mirror between a row and the claim records about it needs the
-    // action even after the free landed
     const current = bind
       ? (bind.action ?? `${SEQUENCE_MARKER} (${bind.sequences.map((s) => s.keys).join(", ")})`)
       : ran;
     const means = primary.describes ?? words(primary.command);
-    // a compatible rebind sticks to the row whether the free is still pending
-    // (action from the live bind) or already applied (kept by the decision)
     const rebind = ran ? SHARED_REBINDS[ran.split(/\s+/)[0]] : undefined;
     conflicts.push({
       editorId: chord,
@@ -410,9 +342,6 @@ function processInfo(pid: number): ProcessInfo | null {
   }
 }
 
-/** kitty reloads its configuration on SIGUSR1. Walk our own ancestry to the
- * kitty process and signal it, so an apply takes effect without the
- * ctrl+shift+f5 ritual. */
 export function reloadKitty(
   info: (pid: number) => ProcessInfo | null = processInfo,
   signal: (pid: number) => void = (pid) => process.kill(pid, "SIGUSR1"),
@@ -437,8 +366,6 @@ export function reloadKitty(
   return false;
 }
 
-/** One scan serves each interaction, like ghostty's — nothing the manager
- * stages changes what the terminal holds until apply or undo rewrites disk. */
 let scanCache: { stamp: string; conflicts: ProviderConflict[] } | null = null;
 
 export const kittyProvider: ShortcutProvider = {
@@ -449,8 +376,6 @@ export const kittyProvider: ShortcutProvider = {
     return kittyBinary() ? null : "the kitty cli is not on PATH, so its keymap cannot be read";
   },
   scan(): ProviderConflict[] {
-    // keyed on every holds input, so an import or a boot that lands new
-    // keybindings mid-session refreshes the scan instead of hiding conflicts
     const stamp = holdsStamp();
     if (scanCache?.stamp !== stamp) {
       scanCache = { stamp, conflicts: allConflicts(keymap(), freedTriggers(kittyConfigDir())) };

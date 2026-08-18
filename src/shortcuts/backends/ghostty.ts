@@ -4,12 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { foreignBindings, holdsStamp, todeKeybindings, removalMasked } from "../../profile";
-import type { Binding } from "../../profile";
-import { extensionClaims } from "../imported";
+import { holdsStamp } from "../../profile";
 import type { EditorHold, FreedMove, ProviderConflict, ShortcutProvider } from "../provider";
-import { claimBindings, loadDecisions, overrideBindings } from "../store";
-import { canonicalChord, defaultBinding } from "../vscode-keymap";
+import { loadDecisions } from "../store";
+import { canonicalChord } from "../vscode-keymap";
 import { words } from "../words";
 
 export function isGhostty(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -18,7 +16,6 @@ export function isGhostty(env: NodeJS.ProcessEnv = process.env): boolean {
 
 export function ghosttyBinary(): string | null {
   try {
-    // well this has nothing to do with the ghsotty binary, this is the cli...? unless the binary accepts arguments and behaves like a cli? plausible
     const found = execFileSync("which", ["ghostty"], { encoding: "utf8" }).trim(); 
     return found || null;
   } catch {
@@ -55,7 +52,6 @@ export function parseKeybinds(output: string): Map<string, string> {
   return table;
 }
 
-// ah its that trivial lol
 export function effectiveKeybinds(binary: string): Map<string, string> {
   const output = execFileSync(binary, ["+list-keybinds"], { encoding: "utf8" });
   return parseKeybinds(output);
@@ -63,27 +59,15 @@ export function effectiveKeybinds(binary: string): Map<string, string> {
 
 let effectiveCache: Map<string, string> | null = null;
 
-/** Test seam: replaces the `ghostty +list-keybinds` call so the whole
- * provider — scan, caches, freed-file writes — runs against a synthetic
- * config. Null restores the real binary. */
 let listKeybindsSource: (() => string) | null = null;
 export function setListKeybindsForTest(source: (() => string) | null): void {
-  // the source of keybinds suka?
-  // i wonder how they even get output that parse keybinds will tell us
-  // list keybind source what does that even mean
-  // wait what the fuck is this doing? so the cache is based on the result of list keybind source
-  // and that is a variable
-  // wait this funciton is a test thing
   listKeybindsSource = source;
   effectiveCache = null;
   scanCache = null;
 }
 
-// oh interesting
-// so somehow we are reading keybinds from ghostty here
 function effective(): Map<string, string> {
   effectiveCache ??= listKeybindsSource
-  // i think this is entirely a test thing?
     ? parseKeybinds(listKeybindsSource())
     : effectiveKeybinds(ghosttyBinary()!);
   return effectiveCache;
@@ -194,9 +178,6 @@ export function freedTriggers(configDir: string): Set<string> {
     const contents = fs.readFileSync(path.join(configDir, ...KEYBINDS_FILE), "utf8");
     return new Set(
       [...parseKeybinds(contents).entries()]
-        // unbound, or rebound by tode to emit the chord's own bytes — both
-        // mean the editor has the chord now; rebind targets (real ghostty
-        // actions) are not freed triggers
         .filter(([, action]) => action === "unbind" || /^(esc:|csi:|text:)/.test(action))
         .map(([trigger]) => trigger),
     );

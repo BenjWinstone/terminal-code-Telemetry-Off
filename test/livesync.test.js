@@ -5,7 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
 
-const { parseRawColors, watchLiveColors } = require("../dist/livesync.js");
+const { parseRawColors } = require("../dist/livesync.js");
 const { withFallbacks } = require("../dist/terminal/osc.js");
 const net = require("node:net");
 

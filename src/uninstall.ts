@@ -18,12 +18,6 @@ import {
 import { PINNED_VERSION } from "./runtime/release";
 import { ghosttyConfigDir, reloadGhostty, removeFreed } from "./shortcuts/backends/ghostty";
 
-/** Everything tode ever wrote, removed. The inverse of installing and using
- * it: the shortcut overrides come out of the terminal's config, the font out
- * of the user's fonts, the data/state/cache homes go whole, and a versioned
- * install tree removes itself. A git checkout never removes itself — release
- * trees carry a VERSION file and the checkout does not, and that file is the
- * gate. */
 
 function confirm(question: string): Promise<boolean> {
   return new Promise((resolve) => {

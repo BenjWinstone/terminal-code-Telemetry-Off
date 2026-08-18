@@ -161,7 +161,6 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<Outcome> {
   }
   writeReceipt(build);
 
-  // the shim carries the root path, so refresh it alongside the tree
   const shim = path.join(
     process.env.XDG_BIN_HOME ?? path.join(process.env.HOME ?? "", ".local", "bin"),
     "tode",

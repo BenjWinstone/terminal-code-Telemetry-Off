@@ -4,10 +4,10 @@ import path from "node:path";
 
 import { builtinKeybindings, installKeybindings, readPalette, removalMasked } from "../profile";
 import { DATA_DIR } from "../runtime/paths";
-import { resolveRuntimeWithProgress, supportedFlags } from "../runtime/release";
+import { resolveRuntimeWithProgress } from "../runtime/release";
 import { extensionHolder, importedConflicts, importedHolder } from "./imported";
 import { wrap } from "./prompt";
-import { providerFor, providerNames } from "./provider";
+import { providerFor } from "./provider";
 import type { ProviderConflict, ShortcutProvider } from "./provider";
 import { QUIT_CHORD, clearDecisions, loadDecisions, saveDecisions } from "./store";
 import type { Decision } from "./store";
@@ -192,7 +192,6 @@ export function managerRows(
   const holds = makeEditorHolds();
   const rowClaims = (
     rowChord: string,
-    own: { action?: string; command?: string },
     others: RowClaim[],
     roots: { decision: Decision | null | undefined; exempt: SelfExempt }[],
   ): RowClaim[] => {
@@ -250,7 +249,6 @@ export function managerRows(
       decision,
       claims: rowClaims(
         conflict.editorId,
-        { action: conflict.current ?? undefined, command: conflict.editor.command },
         conflict.others.map((other) => ({
           chord: conflict.editorId,
           command: other.command,
@@ -293,7 +291,6 @@ export function managerRows(
       // holders seated, exempting only that mover's own command
       claims: rowClaims(
         imported.key,
-        { command: imported.command },
         [],
         [
           {

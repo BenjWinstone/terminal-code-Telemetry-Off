@@ -5,10 +5,6 @@ import path from "node:path";
 
 import { CACHE_DIR } from "../runtime/paths";
 
-/** A png for the app an editor state-dir belongs to, derived rather than
- * mapped: every vscode fork is an Electron bundle whose product.json names
- * the very state dir tode found (nameShort / applicationName), so matching
- * those identifies the bundle with no table of app names. */
 
 interface Product {
   nameShort?: string;
@@ -76,8 +72,6 @@ function macIcns(appDir: string): string | null {
   }
 }
 
-/** XDG desktop entries name apps and their icons; the hicolor theme holds the
- * pngs. Enough for the common installs — a miss simply means no icon. */
 function linuxIconFor(editorName: string): string | null {
   const wanted = slug(editorName);
   const dataDirs = [
@@ -114,9 +108,6 @@ function linuxIconFor(editorName: string): string | null {
   return null;
 }
 
-/** The png path for an editor's app icon, or null when there is none to find.
- * macOS icons arrive as icns and go through the system's own converter once,
- * cached by source mtime. */
 export function editorIconPng(editorName: string): string | null {
   if (process.platform === "linux") return linuxIconFor(editorName);
   if (process.platform !== "darwin") return null;
@@ -133,7 +124,6 @@ export function editorIconPng(editorName: string): string | null {
   try {
     
     fs.mkdirSync(path.dirname(cached), { recursive: true });
-    // sips? whats sips
     execFileSync(
       "sips",
       ["-z", "64", "64", "-s", "format", "png", icns, "--out", cached],

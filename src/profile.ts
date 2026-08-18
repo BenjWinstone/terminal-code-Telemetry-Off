@@ -90,14 +90,6 @@ export function cachedPalette(): TerminalPalette | null {
   }
 }
 
-/** A palette learned some other way than the tty query — a live change coming
- * through terminal-browser — is still worth remembering, so the next open
- * falls back to it if the terminal happens not to answer that time. */
-export function cachePalette(palette: TerminalPalette): void {
-  fs.mkdirSync(path.dirname(PALETTE_CACHE), { recursive: true });
-  fs.writeFileSync(PALETTE_CACHE, `${JSON.stringify(palette, null, 2)}\n`);
-}
-
 export async function readPalette(): Promise<{ palette: TerminalPalette; source: "terminal" | "cache" | "default" }> {
   const asked = await queryTerminal();
   if (asked?.background) {

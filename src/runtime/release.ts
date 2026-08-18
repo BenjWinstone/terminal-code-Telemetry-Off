@@ -13,7 +13,7 @@ import { BROWSER_HOME, RUNTIME_DIR, VENDOR_DIR } from "./paths";
 /** The terminal-browser build tode is written against. tode drives flags whose
  * behaviour is specific to this build, so it pins rather than taking whatever
  * happens to be installed. */
-export const PINNED_VERSION = "main-09123e5";
+export const PINNED_VERSION = "main-0a79797";
 
 const RELEASE_ORIGIN = process.env.TODE_RELEASE_ORIGIN ?? "https://terminal-browser.sh/install";
 
@@ -203,25 +203,6 @@ export async function fetchVerified(
 function download(release: Release, onProgress?: (fraction: number) => void): Promise<string> {
   const tarball = path.join(RUNTIME_DIR, `${release.version}.tar.gz`);
   return fetchVerified(release.url, release.sha256, release.size, tarball, onProgress);
-}
-
-/** Ask the runtime which options it takes rather than assuming, so tode can be
- * ahead of the release it is pinned to without failing to start. */
-export function supportedFlags(runtime: Runtime): Set<string> {
-  const cache = path.join(RUNTIME_DIR, `flags-${runtime.version}.txt`);
-  let help = "";
-  try {
-    help = fs.readFileSync(cache, "utf8");
-  } catch {
-    try {
-      help = execFileSync(runtime.bin, ["open", "--help"], { encoding: "utf8", timeout: 10_000 });
-      fs.mkdirSync(path.dirname(cache), { recursive: true });
-      fs.writeFileSync(cache, help);
-    } catch {
-      return new Set();
-    }
-  }
-  return new Set(help.match(/--[a-z][a-z0-9-]*/g) ?? []);
 }
 
 export interface ResolveOptions {

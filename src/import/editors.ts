@@ -9,9 +9,6 @@ export interface Editor {
   lastUsed: number;
 }
 
-/** The folder an editor keeps its extensions in is not derivable from the one it
- * keeps its settings in, so a few known names are tried before falling back to
- * the shape the rest of them follow. */
 const KNOWN_EXTENSION_DIRS: Record<string, string> = {
   Code: ".vscode",
   "Code - Insiders": ".vscode-insiders",

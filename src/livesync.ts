@@ -1,5 +1,3 @@
-import fs from "node:fs";
-
 import { withFallbacks } from "./terminal/osc";
 import type { TerminalPalette } from "./terminal/osc";
 
@@ -24,10 +22,3 @@ export function parseRawColors(text: string): TerminalPalette | null {
   });
 }
 
-function readRawColors(file: string): TerminalPalette | null {
-  try {
-    return parseRawColors(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}

@@ -42,7 +42,7 @@ export async function importCommand(args: string[]): Promise<number> {
     editor = await choose(editors);
   } else {
     process.stdout.write(`${editors.map((e) => `  ${e.name}  ${dim(summarise(describe(e)))}`).join("\n")}\n`);
-    process.stdout.write("\nrun tode import <name>, or run it on a terminal to pick\n");
+    process.stdout.write("\nrun tode import <name>, or run this command inside a terminal\n");
     return 0;
   }
   if (!editor) {

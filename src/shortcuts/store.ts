@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DATA_DIR } from "../runtime/paths";
-import { extensionClaims } from "./imported";
 
 /** Where a chord should live: freed in the terminal, carried by another chord
  * on the editor side, or left exactly as it is. An editor decision remembers
@@ -101,21 +100,6 @@ export function overrideBindings(): { key: string; command: string; when?: strin
  * so it must not veto editor focus — only genuine input boxes (inputFocus
  * without editorTextFocus). */
 const HINT_BASE = "!terminalFocus && !editorHasSelection && (!inputFocus || editorTextFocus)";
-
-/** `base`, minus every context an installed extension declared for its own
- * binding on the chord. tode's bindings live at user level and outrank any
- * extension's, so this is how an extension keeps a chord it uses: its own
- * when clause says exactly where the chord means something to it, and tode
- * steps aside there — whichever extension it is. */
-export function carvedWhen(base: string | undefined, chord: string): string | undefined {
-  const carved = new Set(
-    extensionClaims(chord)
-      .filter((claim) => claim.when)
-      .map((claim) => `!(${claim.when})`),
-  );
-  const parts = [...(base ? [base] : []), ...carved];
-  return parts.length ? parts.join(" && ") : undefined;
-}
 
 export function quitWhen(): string {
   return QUIT_CHORD === "ctrl+c" ? HINT_BASE : "!terminalFocus";

@@ -14,9 +14,6 @@ function sameChord(a: string, b: string): boolean {
   return canon(a) === canon(b);
 }
 
-/** What an imported or hand-written keybinding runs on this chord, or null
- * when nothing sits there. Entries whose command starts with "-" remove a
- * binding rather than hold the chord, so they do not count. */
 export function importedHolder(chord: string): string | null {
   const found = foreignBindings().find(
     (entry) =>

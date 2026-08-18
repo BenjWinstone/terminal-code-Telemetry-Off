@@ -7,7 +7,6 @@ import { foreignBindings, removalMasked, todeKeybindings } from "../profile";
 import { extensionClaims } from "./imported";
 import type { EditorHold } from "./provider";
 import { canonicalChord, defaultBinding } from "./vscode-keymap";
-import { words } from "./words";
 
 export function makeEditorHolds(): (chord: string) => EditorHold[] {
   const own = new Map<string, EditorHold[]>();

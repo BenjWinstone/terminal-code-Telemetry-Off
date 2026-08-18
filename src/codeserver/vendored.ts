@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -40,18 +39,10 @@ function binAt(root: string): string | null {
   return fs.existsSync(bin) ? bin : null;
 }
 
-function onPath(): string | null {
-  try {
-    return execFileSync("which", ["code-server"], { encoding: "utf8" }).trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 export function installedCodeServer(): string | null {
   const configured = process.env.TODE_CODE_SERVER;
   if (configured) return configured;
-  return binAt(codeServerRoot()) ?? onPath();
+  return binAt(codeServerRoot());
 }
 
 export function narrateFetch(label: string): (fraction: number) => void {

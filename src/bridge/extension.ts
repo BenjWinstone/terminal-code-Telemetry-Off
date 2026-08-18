@@ -31,12 +31,16 @@ interface VscodeApi {
   Uri: {
     file(target: string): Uri;
     from(parts: { scheme: string; authority: string; path: string }): Uri;
+    parse(target: string): Uri;
   };
   commands: {
     registerCommand(command: string, callback: () => unknown): Disposable;
     executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   };
-  env: { remoteAuthority?: string };
+  env: {
+    remoteAuthority?: string;
+    openExternal(target: Uri): PromiseLike<boolean>;
+  };
   window: {
     showErrorMessage(
       message: string,
@@ -106,12 +110,8 @@ export function bridgeMain(ctx: BridgeCtx): void {
 
   const NL = String.fromCharCode(10);
 
-  /** Closes this window only. The command resolves to window.close() in the
-   * page, which inside terminal-browser's electron window ends just this
-   * session — other panes stay up. `tode shutdown` remains the everything-off
-   * switch. */
   function quitTode(): void {
-    void vscode.commands.executeCommand("workbench.action.closeWindow");
+    void vscode.env.openExternal(vscode.Uri.parse("terminal-browser://quit"));
   }
 
   function applyThemeDocument(theme: BridgeTheme | null | undefined): void {

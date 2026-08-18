@@ -17,8 +17,3 @@ export function wrap(text: string, indent: string): string[] {
   if (line) lines.push(indent + line);
   return lines;
 }
-
-export function fit(text: string): string {
-  const width = columns() - 1;
-  return text.length > width ? `${text.slice(0, width - 1)}…` : text;
-}

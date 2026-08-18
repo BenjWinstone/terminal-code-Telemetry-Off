@@ -37,9 +37,7 @@ function fontAsset(): string {
 export function codeServerBin(): string {
   const found = installedCodeServer();
   if (found) return found;
-  throw new Error(
-    "code-server not found" 
-  );
+  throw new Error(`code-server ${CODE_SERVER_VERSION} not found`);
 }
 
 function readState(): ServerState | null {
@@ -203,6 +201,7 @@ export async function startInjector(
   portFile = PORT_FILE,
 ): Promise<{ pid: number; port: number }> {
   const port = await injectorPort(portFile);
+  // interesting? a script?
   const script = path.join(__dirname, "injector-main.js");
   const font = fontAsset();
   const child = spawn(process.execPath, [script, String(upstream), String(port), CSS_FILE, font], {
