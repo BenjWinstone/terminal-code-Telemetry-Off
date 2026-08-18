@@ -13,7 +13,7 @@ export default function SiteHeader() {
           terminal-code
         </Link>
         <a
-          href="https://github.com/zenbu-labs/tode"
+          href="https://github.com/zenbu-labs/terminal-code"
           target="_blank"
           rel="noreferrer"
           aria-label="terminal-code on GitHub"

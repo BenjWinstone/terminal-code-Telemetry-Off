@@ -65,7 +65,7 @@ export default function Home() {
               How does it work?
             </h2>
             <p className="mt-3 max-w-[560px] text-[13px] leading-[1.75] text-muted">
-             terminal-code combines{" "}
+              terminal-code combines{" "}
               <a
                 href="https://github.com/coder/code-server"
                 target="_blank"
@@ -101,7 +101,7 @@ export default function Home() {
               contact
             </a>
             <a
-              href="https://github.com/zenbu-labs/tode"
+              href="https://github.com/zenbu-labs/terminal-code"
               target="_blank"
               rel="noreferrer"
               aria-label="terminal-code on GitHub"

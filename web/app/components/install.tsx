@@ -35,11 +35,10 @@ export default function Install() {
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`border border-b-0 px-3 py-[5px] transition-colors ${
-              tab === t.id
+            className={`border border-b-0 px-3 py-[5px] transition-colors ${tab === t.id
                 ? "border-border bg-panel text-text2"
                 : "border-transparent text-faint hover:text-text2"
-            }`}
+              }`}
           >
             {t.label}
           </button>
@@ -58,11 +57,10 @@ export default function Install() {
               onClick={copy}
               aria-label={copied ? "Copied" : "Copy install command"}
               title={copied ? "Copied" : "Copy"}
-              className={`ml-2.5 grid h-[26px] w-[26px] shrink-0 place-items-center border border-transparent transition-colors ${
-                copied
+              className={`ml-2.5 grid h-[26px] w-[26px] shrink-0 place-items-center border border-transparent transition-colors ${copied
                   ? "text-ok"
                   : "text-ok/65 hover:border-ok/35 hover:text-ok"
-              }`}
+                }`}
             >
               {copied ? <CheckIcon /> : <CopyIcon />}
             </button>
@@ -74,7 +72,7 @@ export default function Install() {
             <span className="font-mono text-[11px] text-text2 sm:text-[12px]">
               learn more{" "}
               <a
-                href="https://github.com/zenbu-labs/tode#windows"
+                href="https://github.com/zenbu-labs/terminal-code#windows"
                 target="_blank"
                 rel="noreferrer"
                 className="underline decoration-ok/60 underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok"

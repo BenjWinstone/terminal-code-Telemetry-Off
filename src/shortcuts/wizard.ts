@@ -586,7 +586,7 @@ export async function shortcutsCommand(
   const provider = providerFor();
   if (!provider) {
     process.stdout.write(
-      `shortcut setup not yet available in this terminal, please file an issue if you want your terminal supported https://github.com/zenbu-labs/tode/issues`
+      `shortcut setup not yet available in this terminal, please file an issue if you want your terminal supported https://github.com/zenbu-labs/terminal-code/issues`
     )
     return 0;
   }
