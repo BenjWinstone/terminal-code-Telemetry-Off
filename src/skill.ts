@@ -58,7 +58,7 @@ function runtimeSources(): string {
     sources.push(`vendored in ${path.join(VENDOR_DIR, "terminal-browser")}`);
   if (fs.existsSync(path.join(RUNTIME_DIR, "terminal-browser", PINNED_VERSION)))
     sources.push(`fetched at ${path.join(RUNTIME_DIR, "terminal-browser", PINNED_VERSION)}`);
-  if (sources.length === 0) return "not on disk yet — the next open or `tode provision` downloads it";
+  if (sources.length === 0) return "not on disk yet — the next open downloads it";
   return sources.join("; ");
 }
 
@@ -75,7 +75,7 @@ export async function skillText(): Promise<string> {
   const daemon = server
     ? `up ${Math.round((Date.now() - server.startedAt) / 60000)}m — code-server pid ${server.pid} on 127.0.0.1:${server.port}, ` +
     `injector pid ${server.injectorPid}; windows load ${origin(server)} (always the injector, never code-server directly)`
-    : "not running — the next `tode` starts it, `tode daemon status|stop` inspects it";
+    : "not running — the next `tode` starts it";
   const codeServer = installedCodeServer();
 
   const sockets = listDir(ipcSocketDir()).filter((entry) => entry.endsWith(".sock"));
@@ -91,7 +91,7 @@ export async function skillText(): Promise<string> {
 
   return `---
 name: tode
-description: Working knowledge of this machine's tode install (the terminal code editor). Where its code-server profile, extensions, keybindings, themes, terminal shortcut overrides, logs and daemon state live, which files are safe to edit and which are regenerated, and how to reach running windows. Regenerate with \`tode skill\` — every path is resolved live and the state section reflects the moment it ran.
+description: Working knowledge of this machine's tode install (the terminal code editor). Where its code-server profile, extensions, keybindings, themes, terminal shortcut overrides, logs and daemon state live, which files are safe to edit and which are regenerated, and how to reach running windows. Regenerate with \`tode --skill\` — every path is resolved live and the state section reflects the moment it ran.
 ---
 
 # tode
@@ -99,7 +99,7 @@ description: Working knowledge of this machine's tode install (the terminal code
 tode is a code editor that runs in the terminal: one warm code-server serves
 the VS Code workbench, an injecting proxy sits in front of it, and
 terminal-browser draws each window as a terminal pane. Everything below was
-resolved on this machine when \`tode skill\` ran — env overrides are already
+resolved on this machine when \`tode --skill\` ran — env overrides are already
 applied, and the state section is live. Re-run it rather than trusting a copy.
 
 ## State right now
@@ -107,7 +107,7 @@ applied, and the state section is live. Re-run it rather than trusting a copy.
 - install root: ${INSTALL_ROOT} — ${install}
 - shim: ${shim} ${fs.existsSync(shim) ? "(present)" : "(absent — run installs go through node directly)"}
 - terminal-browser pin ${PINNED_VERSION}: ${runtimeSources()}
-- code-server ${CODE_SERVER_VERSION}: ${codeServer ?? `not fetched yet — expected under ${codeServerRoot()}, \`tode provision\` gets it`}
+- code-server ${CODE_SERVER_VERSION}: ${codeServer ?? `not fetched yet — the first open puts it under ${codeServerRoot()}`}
 - daemon: ${daemon}
 - open windows: ${sockets.length} socket(s) in ${ipcSocketDir()}${sockets.length ? ` — ${sockets.join(", ")}` : ""}
 - this shell ${inWindow ? `is inside a tode window (TODE_IPC=${inWindow})` : "is not inside a tode window (no TODE_IPC)"}
@@ -141,18 +141,18 @@ operation uses this one.
 
 ## Theme
 
-- \`tode theme\` reads the terminal palette over OSC and rebuilds everything;
-  \`tode theme <file.json>\` sets a vscode theme document instead.
+- \`tode --theme\` reads the terminal palette over OSC and rebuilds everything;
+  \`tode --theme <file.json>\` sets a vscode theme document instead.
 - ${LIVE_THEME_FILE} — the full generated theme. Open windows watch it and
   restyle without a reload, so writing a valid vscode theme document here is
   the live-update path. It is regenerated from the palette on the next open.
 - ${PALETTE_CACHE} — cached terminal colours; delete to force a re-read.
 - ${CSS_FILE} — css the proxy injects into every workbench page; regenerated
-  on every open. Its siblings ${path.basename(CSS_FILE)}.timing.json and .launch.json feed \`tode timing\`.
+  on every open. Its siblings ${path.basename(CSS_FILE)}.timing.json and .launch.json feed \`tode --timing\`.
 
 ## Terminal shortcut overrides
 
-The wizard (\`tode shortcut-setup\`, \`--undo\` to revert) frees contested chords
+The wizard (\`tode --shortcut-setup\`, \`--undo\` to revert) frees contested chords
 by writing one tode-owned file into the terminal's config dir and a single
 include line into the terminal's own config — nothing the user wrote is edited.
 
@@ -177,7 +177,7 @@ ${STARTUP_VIEW_FILE} is a one-shot marker the bridge consumes at startup.
 ## Daemon and processes
 
 - ${STATE_FILE} — pids and ports of code-server and the injector; treat as
-  read-only, \`tode daemon stop\` / \`tode shutdown\` remove it properly.
+  read-only, \`tode --shutdown\` removes it properly.
 - ${PORT_FILE} — the injector's sticky port, reused while free so saved
   workspaces and the chromium cache stay valid.
 - ${path.join(LOGS_DIR, "code-server.log")} — combined code-server + injector log, append-only.
@@ -193,8 +193,8 @@ ${STARTUP_VIEW_FILE} is a one-shot marker the bridge consumes at startup.
 - terminal-browser gets its own homes so the user's are untouched:
   data ${BROWSER_HOME.data}, state ${BROWSER_HOME.state}, cache ${BROWSER_HOME.cache},
   chromium ${BROWSER_HOME.appData}
-- \`tode uninstall\` removes all of the above plus the install root, shim, font
-  and ghostty overrides.
+- \`tode --uninstall\` removes all of the above plus the install root, shim,
+  font and ghostty overrides.
 
 ## Environment variables
 
@@ -209,9 +209,10 @@ ${STARTUP_VIEW_FILE} is a one-shot marker the bridge consumes at startup.
 ## Commands
 
 open: \`tode [path...]\` (-g goto, -d diff, -a add, -r reuse, -n new pane, -w wait,
---split/--size, --review, --install-extension, --list-extensions). Others:
-shortcut-setup, import, theme, runtime, provision, daemon status|stop, timing,
-quit, upgrade, shutdown, uninstall, skill (this document).
+--split/--size, --review, --install-extension, --list-extensions). Every bare
+word is a path; commands are flags in first position: --shortcut-setup,
+--import, --theme, --timing (alone: the last page load), --upgrade,
+--shutdown, --uninstall, --skill (this document).
 `;
 }
 

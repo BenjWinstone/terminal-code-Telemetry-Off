@@ -621,7 +621,7 @@ export async function shortcutsCommand(
   }
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stdout.write("run tode shortcut-setup in a terminal to continue\n");
+    process.stdout.write("run tode --shortcut-setup in a terminal to continue\n");
     return 0;
   }
 

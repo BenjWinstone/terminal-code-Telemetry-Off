@@ -557,7 +557,7 @@ test("skill emits SKILL.md frontmatter with every path resolved from the env", (
   const path = require("node:path");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "tode-skill-"));
   try {
-    const out = execFileSync("node", [path.join(__dirname, "..", "dist", "main.js"), "skill"], {
+    const out = execFileSync("node", [path.join(__dirname, "..", "dist", "main.js"), "--skill"], {
       encoding: "utf8",
       env: {
         ...process.env,

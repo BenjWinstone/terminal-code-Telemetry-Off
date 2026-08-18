@@ -149,7 +149,7 @@ export function fromTrigger(trigger: string): string | null {
   return canonicalChord(parts.join("+"));
 }
 
-const HEADER = "# written by tode shortcut-setup — frees the chords the editor needs from kitty\n";
+const HEADER = "# written by tode --shortcut-setup — frees the chords the editor needs from kitty\n";
 export const INCLUDE_LINE = "include tode/keybinds.kitty.conf";
 const KEYBINDS_FILE = ["tode", "keybinds.kitty.conf"];
 

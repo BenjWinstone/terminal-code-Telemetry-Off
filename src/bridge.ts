@@ -70,7 +70,7 @@ export function quitHintMessage(): string {
     return `Press ${decision.key} to quit terminal-code`;
   }
   if (decision?.choice === "keep") {
-    return `${QUIT_CHORD} is taken. Quit terminal-code from the command palette, or run: tode shortcut-setup`;
+    return `${QUIT_CHORD} is taken. Quit terminal-code from the command palette, or run: tode --shortcut-setup`;
   }
   return `Press ${QUIT_CHORD} to quit terminal-code`;
 }

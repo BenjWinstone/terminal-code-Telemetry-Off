@@ -7,12 +7,11 @@ import path from "node:path";
 import {
   CSS_FILE,
   codeServerBin,
-  currentServer,
   ensureServer,
   origin,
   stopServer,
 } from "./codeserver/server";
-import { CODE_SERVER_VERSION, ensureCodeServer, installedCodeServer, narrateFetch } from "./codeserver/vendored";
+import { CODE_SERVER_VERSION, ensureCodeServer, narrateFetch } from "./codeserver/vendored";
 import { installBridge, requestStartupView } from "./bridge";
 import { BOOT_AFTER_APPLY, autoApplyShared, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
@@ -32,7 +31,6 @@ import {
 } from "./profile";
 import { Pane, launchBrowser } from "./launch";
 import { PINNED_VERSION, resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
-import { BROWSER_HOME } from "./runtime/paths";
 import { skillCommand } from "./skill";
 import { resolveTarget, workbenchUrl } from "./target";
 import { uninstallCommand } from "./uninstall";
@@ -114,48 +112,38 @@ function takeBool(args: string[], name: string): boolean {
  */
 
 const HELP = `Usage: tode [path...] [options]
-       tode <command>
+       tode --<command>
 
-  tode                  Open the current folder
-  tode <folder>         Open that folder
-  tode <file>           Open just that file, without its folder
+  tode                  Open the folder in the current working directory
+  tode <folder>         Open the specified folder
+  tode <file>           Open the specified file
 
-Run from a terminal inside tode, a file opens in that window and a folder
-opens its own pane. Pass -r to open the folder in the window you are in.
 
 Options:
   -g, --goto <f:l:c>    Open a file at a line and column
-  -a, --add <folder>    Add a folder to the window rather than replacing it
+  -a, --add <folder>    Add a folder to the active workspace
   -n, --new-window      Open a new pane even for a file
   -w, --wait            Wait until the file is closed again
   -d, --diff <a> <b>    Compare two files
-  -r, --reuse-window    Open the folder in this window rather than a new pane
+  -r, --reuse-window    Open folder in this window rather than a new pane
   --install-extension   Install an extension by id or vsix path
   --uninstall-extension Remove an extension
-  --list-extensions     List what is installed, with --show-versions
+  --list-extensions     List installed extensions
   --split <direction>   Open in a new pane: right, left, down, up
-  --size <fraction>     How much of the space the split takes (0.2 to 0.95)
-  --timing              Report how long each stage took
+  --size <fraction>     The % a new split will take up (0.2 to 0.95)
+  --timing              Report how long each stage of this open took
   --review              Open on the source control panel
 
-Commands:
-  shortcut-setup        Decide, chord by chord, whether this terminal or the
-                        editor gets each contested shortcut (--undo)
-  timing                Where the last page load spent its time
-  quit                  Close the terminal-code panes, leaving code-server warm
-  import [editor]       Bring settings, keybindings, snippets and extensions
-                        over from vscode or a fork of it
-  theme [file]          Show the colours this terminal reports, and rebuild;
-                        with a vscode theme file, set that as the editor theme
-  runtime               Which terminal-browser build is in use, and why
-  provision             Fetch the pinned code-server build if it is missing
-  daemon status|stop    The code-server that stays warm between opens
-  skill                 This install as a SKILL.md, for coding agents: every
-                        path resolved, live state, what is safe to edit
-  upgrade [--check]     Install the newest build on this channel
-  shutdown              Stop everything tode is running
-  uninstall [--yes]     Remove terminal-code entirely: the app, its profile and data,
-                        and the shortcut overrides in your terminal config
+Commands, each as the first argument:
+  --shortcut-setup      Resolve shortcut conflicts between terminal-code and the current terminal
+  --timing              Profile terminal-code launch
+  --import [editor]     Bring settings, keybindings, snippets and extensions
+                        over from vscode compatible editors
+  --theme [file]        Set editor theme
+  --skill               An agent skill to assist with modifying terminal-code
+  --upgrade [--check]   Upgrade terminal-code to the latest version
+  --shutdown            Stop all terminal-code activities
+  --uninstall [--yes]   Remove all terminal-code data from this machine
 `;
 
 
@@ -266,6 +254,10 @@ async function openCommand(args: string[]): Promise<number> {
   const target = wanted[0] ?? resolveTarget(undefined, process.cwd());
   const runtime = await resolveRuntimeWithProgress();
   done("runtime");
+  // code-server is fetched here, while tode still owns the tty: the narrated
+  // download must not interleave with a pane that has taken over the screen.
+  // Installed already (every open but the first), this is one existsSync.
+  await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
   const { palette } = await readPalette();
   ensureFont();
   installTheme(palette);
@@ -370,57 +362,6 @@ async function themeCommand(file?: string): Promise<number> {
   return 0;
 }
 
-async function runtimeCommand(): Promise<number> {
-  const runtime = await resolveRuntimeWithProgress();
-  const why = {
-    override: "TODE_TERMINAL_BROWSER_BIN points at it",
-    vendored: "shipped inside this install",
-    pinned: "already fetched for this pin",
-    cloned: "cloned from the install already on this machine",
-    downloaded: "downloaded for this pin",
-  }[runtime.source];
-  process.stdout.write(
-    `terminal-browser ${runtime.version}  (${why})\n` +
-    `  bin      ${runtime.bin}\n` +
-    `  data     ${BROWSER_HOME.data}\n` +
-    // chromium wat
-    `  chromium ${BROWSER_HOME.appData}\n`,
-  );
-  return 0;
-}
-
-/** Everything a first open would have to download, fetched up front: the
- * installer runs this so the install is complete when it says it is. */
-async function provisionCommand(): Promise<number> {
-  await resolveRuntimeWithProgress();
-  const had = installedCodeServer();
-  if (had) {
-    process.stdout.write(`code-server ready at ${had}\n`);
-    return 0;
-  }
-  const bin = await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
-  process.stdout.write(`code-server ready at ${bin}\n`);
-  return 0;
-}
-
-async function daemonCommand(action: string | undefined): Promise<number> {
-  if (action === "stop") {
-    process.stdout.write(stopServer() ? "code-server stopped\n" : "code-server was not running\n");
-    return 0;
-  }
-  if (action && action !== "status") fail(`unknown daemon action ${action}`);
-  const state = await currentServer();
-  if (!state) {
-    process.stdout.write("code-server is not running\n");
-    return 0;
-  }
-  const minutes = Math.round((Date.now() - state.startedAt) / 60000);
-  process.stdout.write(
-    `code-server up ${minutes}m on ${origin(state)}\n  ${state.version}\n  pid ${state.pid}\n`,
-  );
-  return 0;
-}
-
 /** The shape the preload sends and the main script writes down. */
 type PageTiming = import("./browser/ctx").PageTiming;
 
@@ -471,17 +412,6 @@ function timingCommand(): number {
   return 0;
 }
 
-async function quitCommand(): Promise<number> {
-  const runtime = await resolveRuntime().catch(() => null);
-  if (!runtime) return 0;
-  await new Promise<void>((resolve) => {
-    const child = spawn(runtime.bin, ["shutdown"], { stdio: "ignore" });
-    child.on("error", () => resolve());
-    child.on("exit", () => resolve());
-  });
-  return 0;
-}
-
 async function shutdownCommand(): Promise<number> {
   const stopped = stopServer();
   const runtime = await resolveRuntime().catch(() => null);
@@ -526,12 +456,9 @@ async function upgradeCommand(args: string[]): Promise<number> {
       process.stdout.write(`tode ${outcome.build.version} is available (you have ${outcome.from})\n`);
       return 0;
     case "upgraded": {
-      // the old code-server is still serving the tree that just moved
+      // the old code-server is still serving the tree that just moved; the
+      // next open fetches whatever the new tree pins, before its pane spawns
       stopServer();
-      // the new tree may pin different bundles; provision through the fresh
-      // shim so the download happens now rather than on the next open
-      const shim = shimPath();
-      if (fs.existsSync(shim)) spawnSync(shim, ["provision"], { stdio: "inherit" });
       process.stdout.write(`tode ${outcome.from} -> ${outcome.build.version}\n`);
       return 0;
     }
@@ -548,28 +475,25 @@ async function main(): Promise<number> {
     process.stdout.write(HELP);
     return 0;
   }
-  if (args[0] === "shortcut-setup") {
+  // commands are flags, and only in first position: every bare word is a
+  // path, so a typo'd command errors as an unknown option instead of quietly
+  // opening a buffer named after it — and a file really named "import" opens
+  if (args[0] === "--shortcut-setup") {
     const rest = args.slice(1);
     const noBoot = takeBool(rest, "--no-boot");
     const code = await shortcutsCommand(rest, noBoot ? undefined : bootEditorUrl);
     if (code === BOOT_AFTER_APPLY) return noBoot ? 0 : openCommand([]);
     return code;
   }
-  if (args[0] === "import") return importCommand(args.slice(1));
-  if (args[0] === "theme") return themeCommand(args[1]);
-  // just not needed, delete me
-  if (args[0] === "runtime") return runtimeCommand();
-  // no u should be removed
-  if (args[0] === "provision") return provisionCommand();
-  // hm, should this exist tho?
-  if (args[0] === "daemon") return daemonCommand(args[1]);
-  if (args[0] === "timing") return timingCommand();
-  if (args[0] === "skill") return skillCommand();
-  // i dont know if i want this quit command, especially since theres a shutdown and that should be equivelent?
-  if (args[0] === "quit") return quitCommand();
-  if (args[0] === "upgrade") return upgradeCommand(args.slice(1));
-  if (args[0] === "shutdown") return shutdownCommand();
-  if (args[0] === "uninstall") return uninstallCommand(args.slice(1));
+  if (args[0] === "--import") return importCommand(args.slice(1));
+  if (args[0] === "--theme") return themeCommand(args[1]);
+  // alone it reads the last load's story; next to a path it stays the open
+  // option that reports this open's stages
+  if (args[0] === "--timing" && args.length === 1) return timingCommand();
+  if (args[0] === "--skill") return skillCommand();
+  if (args[0] === "--upgrade") return upgradeCommand(args.slice(1));
+  if (args[0] === "--shutdown") return shutdownCommand();
+  if (args[0] === "--uninstall") return uninstallCommand(args.slice(1));
   return openCommand(args);
 }
 

@@ -169,7 +169,7 @@ export function fromTrigger(trigger: string): string | null {
   return canonicalChord(parts.join("+"));
 }
 
-const HEADER = "# written by tode shortcut-setup — frees the chords the editor needs from ghostty\n";
+const HEADER = "# written by tode --shortcut-setup — frees the chords the editor needs from ghostty\n";
 export const INCLUDE_LINE = "config-file = ?tode/keybinds.ghostty";
 const KEYBINDS_FILE = ["tode", "keybinds.ghostty"];
 

@@ -13,7 +13,7 @@ const os = require("os");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..");
-const { CODE_SERVER_VERSION, codeServerRoot } = require(path.join(ROOT, "dist/codeserver/vendored.js"));
+const { CODE_SERVER_VERSION, codeServerRoot, ensureCodeServer, narrateFetch } = require(path.join(ROOT, "dist/codeserver/vendored.js"));
 const { freePort, answering } = require(path.join(ROOT, "dist/codeserver/server.js"));
 const { parseJsonc } = require(path.join(ROOT, "dist/jsonc.js"));
 
@@ -117,10 +117,11 @@ exports.activate = async () => {
 };
 `;
 
-function codeServerBin() {
+async function codeServerBin() {
   const bin = path.join(codeServerRoot(), "bin", "code-server");
+  if (!fs.existsSync(bin)) await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
   if (!fs.existsSync(bin)) {
-    console.error(`pinned code-server ${CODE_SERVER_VERSION} is not installed — run: tode provision`);
+    console.error(`pinned code-server ${CODE_SERVER_VERSION} did not land at ${bin}`);
     process.exit(1);
   }
   return bin;
@@ -160,7 +161,7 @@ async function dump(platform) {
   const dumpFile = path.join(scratch, "dump.json");
   const serverPort = await freePort();
   const server = spawn(
-    codeServerBin(),
+    await codeServerBin(),
     [
       "--auth", "none",
       "--bind-addr", `127.0.0.1:${serverPort}`,

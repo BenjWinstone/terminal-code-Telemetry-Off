@@ -702,7 +702,7 @@ export function App({ state }: { state: ManagerState }) {
           </div>
           <div className="introrest">
             For the best experience, continue onboarding to resolve the shortcut conflicts. You can
-            also skip this step and run <kbd>tode shortcut-setup</kbd> to resolve them later.
+            also skip this step and run <kbd>tode --shortcut-setup</kbd> to resolve them later.
           </div>
           <div className="introrest">Estimated Time: {estimatedMinutes(rows.length)}</div>
           <div className="introactions">
@@ -813,7 +813,7 @@ export function App({ state }: { state: ManagerState }) {
               </div>
             )}
             <div className="note">
-              You can run <kbd>tode shortcut-setup</kbd> in your terminal to continue resolving shortcuts.
+              You can run <kbd>tode --shortcut-setup</kbd> in your terminal to continue resolving shortcuts.
             </div>
             <div className="actions compact">
               {pending > 0 ? (

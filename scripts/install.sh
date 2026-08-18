@@ -74,12 +74,6 @@ if [ "$(uname -s)" = Linux ]; then
   fi
 fi
 
-# code-server is too big to ride inside every release tarball, so the freshly
-# installed tode fetches the pinned build now — the install is complete when
-# this script says it is
-if ! "$BIN_HOME/tode" provision; then
-  echo "warning: could not fetch code-server — tode will retry on first open" >&2
-fi
 
 mkdir -p "$STATE_HOME/tode"
 cat > "$STATE_HOME/tode/install.json" <<EOF
