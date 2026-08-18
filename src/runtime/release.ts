@@ -204,6 +204,7 @@ export interface ResolveOptions {
 
 export async function resolveRuntimeWithProgress(): Promise<Runtime> {
   let announced = false;
+  let lastPercent = -1;
   return resolveRuntime({
     onProgress: (stage, fraction) => {
       if (stage === "downloading") {
@@ -212,6 +213,8 @@ export async function resolveRuntimeWithProgress(): Promise<Runtime> {
           announced = true;
         }
         const percent = Math.round(fraction * 100);
+        if (percent === lastPercent) return;
+        lastPercent = percent;
         process.stderr.write(`\r  ${percent}%${percent === 100 ? "\n" : ""}`);
       }
       if (stage === "cloning" && !announced) {
