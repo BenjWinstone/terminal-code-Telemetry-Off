@@ -86,6 +86,17 @@ export default function Home() {
               (a browser in the terminal) to bring VS Code to the terminal. You
               should look into these projects for more details!
             </p>
+            <p className="mt-3 max-w-[560px] text-[13px] leading-[1.75] text-muted">
+              <a
+                href="https://github.com/zenbu-labs/terminal-code"
+                target="_blank"
+                rel="noreferrer"
+                className="text-text2 underline decoration-border underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok/50"
+              >
+                terminal-code
+              </a>{" "}
+              is also open source if you want to learn more.
+            </p>
           </div>
         </div>
 

@@ -6,11 +6,13 @@ const LINES = [
   { cmd: "tode", note: "opens the current folder" },
   { cmd: "tode <folder>", note: "opens that folder" },
   { cmd: "tode <file>", note: "opens that file" },
+  { cmd: "tode --goto <f:l:c>", note: "opens a file at a line and column" },
+  { cmd: "tode --diff <a> <b>", note: "compares two files" },
   { cmd: "tode --split right", note: "opens terminal-code in a terminal split pane to the right" },
   { cmd: "tode --review", note: "opens on the source control panel" },
-  { cmd: "tode import", note: "import settings from vscode compatible editors" },
-  { cmd: "tode shortcuts", note: "helps resolve conflicting keybinds between the terminal and terminal-code" },
-  { cmd: "tode upgrade", note: "upgrades terminal-code to the newest version" },
+  { cmd: "tode --import", note: "imports settings, keybindings, snippets and extensions from vscode compatible editors" },
+  { cmd: "tode --shortcut-setup", note: "resolves shortcut conflicts between terminal-code and the current terminal" },
+  { cmd: "tode --upgrade", note: "upgrades terminal-code to the latest version" },
 ];
 
 export default function Usage() {
