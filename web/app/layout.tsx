@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -28,7 +29,10 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${mono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
