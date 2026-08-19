@@ -1,4 +1,4 @@
-# terminal-browser
+# terminal-code
 
 
 VS Code inside your terminal
