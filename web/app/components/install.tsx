@@ -72,7 +72,7 @@ export default function Install() {
             <span className="font-mono text-[11px] text-text2 sm:text-[12px]">
               learn more{" "}
               <a
-                href="https://github.com/zenbu-labs/terminal-cod#windows"
+                href="https://github.com/zenbu-labs/terminal-code#windows"
                 target="_blank"
                 rel="noreferrer"
                 className="underline decoration-ok/60 underline-offset-[3px] transition-colors hover:text-ok hover:decoration-ok"
