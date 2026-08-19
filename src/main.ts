@@ -30,7 +30,8 @@ import {
   readPalette,
 } from "./profile";
 import { Pane, launchBrowser } from "./launch";
-import { PINNED_VERSION, resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
+import { resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
+import { INSTALL_ROOT } from "./runtime/paths";
 import { skillCommand } from "./skill";
 import { resolveTarget, workbenchUrl } from "./target";
 import { uninstallCommand } from "./uninstall";
@@ -459,7 +460,11 @@ async function upgradeCommand(args: string[]): Promise<number> {
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   if (args[0] === "--version" || args[0] === "-v") {
-    process.stdout.write(`tode, terminal-browser ${PINNED_VERSION}\n`);
+    let version = "dev";
+    try {
+      version = fs.readFileSync(path.join(INSTALL_ROOT, "VERSION"), "utf8").trim() || "dev";
+    } catch {}
+    process.stdout.write(`${version}\n`);
     return 0;
   }
   if (args[0] === "--help" || args[0] === "-h") {
