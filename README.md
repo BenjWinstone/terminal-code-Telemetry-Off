@@ -64,3 +64,10 @@ so they no longer conflict
 
 terminal-code combines [terminal-browser](https://github.com/zenbu-labs/terminal-browser) (a browser in the terminal) and [code-server](https://github.com/coder/code-server) (VS Code in the browser) to bring VS Code to the terminal. You should look into these projects for more details!
 
+
+### Windows
+
+terminal-code depends on a modern terminal feature ([the kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/)) that not many terminals on Windows support. There are projects attempting to bring this capability to terminals on Windows that you can try at your own risk:
+- https://github.com/ibuildthecloud/winterm-ghostty
+
+Even with a compatible terminal, terminal-code does not have an official windows build. But, it's possible to install the linux version of terminal-code inside [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), which is the final piece needed to run terminal-code on Windows. Please file an issue if you are eager for a more official solution
