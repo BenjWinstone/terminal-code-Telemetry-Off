@@ -8,7 +8,7 @@ VS Code inside your terminal
 ### Install (macOS & Linux)
 
 ```bash
-herdr plugin install zenbu-labs/tode/herdr-plugin
+herdr plugin install zenbu-labs/terminal-code/herdr-plugin
 ```
 ### Herdr actions 
 #### `open-split`
