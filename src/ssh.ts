@@ -122,14 +122,35 @@ function shellQuote(value: string): string {
 }
 
 function resolveSshDestination(target: string): { destination: string; hostArgs: string[] } {
-  if (!target.includes("@") && !target.includes(":")) {
-    const alias = shellAlias(target);
+  const words = target.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    const tokens = words[0] === "ssh" ? words.slice(1) : words;
+    const hostArgs: string[] = [];
+    let found: string | null = null;
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token.startsWith("-")) {
+        hostArgs.push(token);
+        if (SSH_VALUE_FLAGS.has(token) && i + 1 < tokens.length) hostArgs.push(tokens[++i]);
+        continue;
+      }
+      if (found) {
+        throw new Error(`invalid --ssh ${target} (both ${found} and ${token} look like destinations)`);
+      }
+      found = token;
+    }
+    if (!found) throw new Error(`invalid --ssh ${target} (no destination)`);
+    return { destination: found, hostArgs };
+  }
+  const single = words[0] ?? "";
+  if (!single.includes("@") && !single.includes(":")) {
+    const alias = shellAlias(single);
     if (alias) {
       const parsed = parseSshCommand(alias);
       if (parsed) return parsed;
     }
   }
-  const match = /^([A-Za-z0-9._-]+@)?([A-Za-z0-9._-]+)(:(\d+))?$/.exec(target);
+  const match = /^([A-Za-z0-9._-]+@)?([A-Za-z0-9._-]+)(:(\d+))?$/.exec(single);
   if (!match) {
     throw new Error(`invalid --ssh ${target} (user@host, host, user@host:port, or an ssh alias)`);
   }
