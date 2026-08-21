@@ -70,7 +70,7 @@ so they no longer conflict
 
 ### SSH
 
-The recommended way to use terminal-code over ssh is running `tode --ssh user@host` on your local machine (where user@host is what you would normally pass to `ssh`).
+The recommended way to use terminal-code over ssh is running `tode --ssh <ssh arguments>` on your local machine.
 
 The alternative is running `tode` directly on the machine you are shh'd into. This will work, but
 requires:
