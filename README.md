@@ -38,6 +38,7 @@ Options:
   --size <fraction>     The % a new split will take up (0.2 to 0.95)
   --timing              Report how long each stage of this open took
   --review              Open on the source control panel
+  --ssh <user@host>     Run terminal-code on an ssh server
 
 Commands, each as the first argument:
   --shortcut-setup      Resolve shortcut conflicts between terminal-code and the current terminal
@@ -45,6 +46,7 @@ Commands, each as the first argument:
   --import [editor]     Bring settings, keybindings, snippets and extensions
                         over from vscode compatible editors
   --theme [file]        Set editor theme
+  --serve [path]        Start code server and print its url
   --skill               An agent skill to assist with modifying terminal-code
   --upgrade [--check]   Upgrade terminal-code to the latest version
   --shutdown            Stop all terminal-code activities
