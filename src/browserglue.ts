@@ -16,18 +16,10 @@ export function ipcSocketDir(): string {
   return path.join(stateHome, "tode", "ipc");
 }
 
-/** The browser scripts are authored as typechecked functions in src/browser and
- * serialized here with toString(): each written file is the compiled function
- * applied to a JSON ctx, nothing else. That holds because the build target
- * needs no injected helpers and the functions keep the closure-free rule
- * documented on each of them — test/browserglue.test.js runs the strings in a
- * bare vm context so a violation of either fails the tests, not the pane. */
 export function preloadSource(ctx: PreloadCtx): string {
   return `"use strict";\n(${preloadMain.toString()})(${JSON.stringify(ctx)});\n`;
 }
 
-/** terminal-browser requires this file for its side effects and calls nothing,
- * so the serialized function is applied at the module's top level. */
 export function mainScriptSource(ctx: MainCtx): string {
   return `"use strict";\n(${browserMain.toString()})(${JSON.stringify(ctx)});\n`;
 }
@@ -37,12 +29,7 @@ export function writeBrowserScripts(): { preload: string; mainScript: string } {
   const mainScript = path.join(DATA_DIR, "browser-main.js");
   const ctx: MainCtx = {
     socketDir: ipcSocketDir(),
-    // the same file `tode timing` reads; the proxy used to write it from a
-    // beacon route, now the preload's message lands it here
     timingFile: `${CSS_FILE}.timing.json`,
-    /**
-     * i dont see any real reason we need to do this, seems overly abstract 
-     */
     modules: {
       livesync: path.join(__dirname, "livesync.js"),
       generate: path.join(__dirname, "theme", "generate.js"),
