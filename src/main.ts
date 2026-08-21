@@ -315,10 +315,9 @@ function installExtensions(listFile: string): void {
   const missing = ids.filter((entry) => !have.has(entry.split("@")[0].toLowerCase()));
   if (missing.length === 0) return;
   process.stdout.write(`installing ${missing.length} extensions\n`);
-  for (const id of missing) {
-    if (extensionCommand(["--install-extension", id], true) !== 0) {
-      process.stderr.write(`  could not install ${id}\n`);
-    }
+  const args = missing.flatMap((id) => ["--install-extension", id]);
+  if (extensionCommand(args) !== 0) {
+    process.stderr.write("  some extensions could not be installed\n");
   }
   registerThemeExtension();
 }
