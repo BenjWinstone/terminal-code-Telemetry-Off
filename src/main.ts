@@ -15,6 +15,8 @@ import { CODE_SERVER_VERSION, ensureCodeServer, narrateFetch } from "./codeserve
 import { installBridge, requestStartupOpen } from "./bridge";
 import { BOOT_AFTER_APPLY, autoApplyShared, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
+import { runImport } from "./import/run";
+import type { Editor } from "./import/editors";
 import { runOnboarding } from "./onboarding";
 import { parseGoto, runningWindow, sendToExtension } from "./ipc";
 import type { OpenFile } from "./ipc";
@@ -33,7 +35,9 @@ import { Pane, launchBrowser } from "./launch";
 import { resolveRuntime, resolveRuntimeWithProgress } from "./runtime/release";
 import { INSTALL_ROOT } from "./runtime/paths";
 import { skillCommand } from "./skill";
+import { sshForward, sshOpen } from "./ssh";
 import { resolveTarget, workbenchUrl } from "./target";
+import type { TerminalPalette } from "./terminal/osc";
 import { uninstallCommand } from "./uninstall";
 import { upgrade } from "./upgrade";
 import { hex } from "./theme/color";
@@ -122,6 +126,7 @@ Options:
   --size <fraction>     The % a new split will take up (0.2 to 0.95)
   --timing              Report how long each stage of this open took
   --review              Open on the source control panel
+  --ssh <user@host>     Run terminal-code on an ssh server
 
 Commands, each as the first argument:
   --shortcut-setup      Resolve shortcut conflicts between terminal-code and the current terminal
@@ -129,6 +134,7 @@ Commands, each as the first argument:
   --import [editor]     Bring settings, keybindings, snippets and extensions
                         over from vscode compatible editors
   --theme [file]        Set editor theme
+  --serve [path]        Start code server and print its url
   --skill               An agent skill to assist with modifying terminal-code
   --upgrade [--check]   Upgrade terminal-code to the latest version
   --shutdown            Stop all terminal-code activities
@@ -284,6 +290,47 @@ async function openCommand(args: string[]): Promise<number> {
   return launchBrowser(runtime, url, palette, { split, size, stages }).catch((error: Error) =>
     fail(error.message),
   );
+}
+
+function importProfile(dir: string): void {
+  const editor: Editor = { name: "this machine", userDir: dir, extensionsDir: null, lastUsed: 0 };
+  process.stdout.write("importing settings\n");
+  const report = runImport(editor);
+  const parts: string[] = [];
+  if (report.settings) parts.push(`${report.settings.imported} settings`);
+  if (report.keybindings) parts.push(`${report.keybindings} keybindings`);
+  if (report.snippets.length) parts.push(`${report.snippets.length} snippet files`);
+  if (report.tasks) parts.push("tasks");
+  if (parts.length) process.stdout.write(`imported ${parts.join(", ")}\n`);
+  installExtensions(path.join(dir, "extensions.txt"));
+}
+
+function installExtensions(listFile: string): void {
+  let ids: string[];
+  try {
+    ids = fs.readFileSync(listFile, "utf8").split("\n").map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return;
+  }
+  const have = new Set(installedExtensions().map((id) => id.toLowerCase()));
+  const missing = ids.filter((entry) => !have.has(entry.split("@")[0].toLowerCase()));
+  if (missing.length === 0) return;
+  process.stdout.write(`installing ${missing.length} extensions\n`);
+  const args = missing.flatMap((id) => ["--install-extension", id]);
+  if (extensionCommand(args) !== 0) {
+    process.stderr.write("  some extensions could not be installed\n");
+  }
+  registerThemeExtension();
+}
+
+function installedExtensions(): string[] {
+  const result = spawnSync(
+    codeServerBin(),
+    ["--list-extensions", "--extensions-dir", EXTENSIONS_DIR, "--user-data-dir", path.join(VSCODE_DIR, "user-data")],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  if (result.status !== 0 || !result.stdout) return [];
+  return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
 function extensionCommand(args: string[], quiet = false): number {
@@ -457,16 +504,79 @@ async function upgradeCommand(args: string[]): Promise<number> {
   }
 }
 
+function installedVersion(): string {
+  try {
+    return fs.readFileSync(path.join(INSTALL_ROOT, "VERSION"), "utf8").trim() || "dev";
+  } catch {
+    return "dev";
+  }
+}
+
+const FORWARDED_OVER_SSH = [
+  "--install-extension",
+  "--uninstall-extension",
+  "--list-extensions",
+  "--shutdown",
+  "--upgrade",
+];
+
+async function sshCommand(target: string | undefined, args: string[]): Promise<number> {
+  if (!target || target.startsWith("-")) fail("--ssh needs a value (user@host or an ssh alias)");
+  if (args.some((arg) => FORWARDED_OVER_SSH.includes(arg))) return sshForward(target, args);
+  const split = takeFlag(args, "--split");
+  const size = takeFlag(args, "--size");
+  const unsupported = args.find((arg) => arg.startsWith("-"));
+  if (unsupported) fail(`${unsupported} is not supported with --ssh yet`);
+  if (args.length > 1) fail("--ssh opens one folder or file");
+  const runtime = await resolveRuntimeWithProgress();
+  const { palette } = await readPalette();
+  return sshOpen(runtime, target, {
+    remotePath: args[0],
+    palette,
+    version: installedVersion(),
+    split,
+    size,
+  });
+}
+
+async function serveCommand(args: string[]): Promise<number> {
+  const paletteFile = takeFlag(args, "--palette");
+  const importDir = takeFlag(args, "--import");
+  const prepare = takeBool(args, "--prepare");
+  const requested = args.find((arg) => !arg.startsWith("-"));
+  await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
+  const palette = paletteFile
+    ? (JSON.parse(fs.readFileSync(paletteFile, "utf8")) as TerminalPalette)
+    : (await readPalette()).palette;
+  if (importDir) importProfile(importDir);
+  ensureFont();
+  installTheme(palette);
+  installCss(palette);
+  installSettings();
+  setLiveTheme(generateTheme(palette));
+  autoApplyShared();
+  if (prepare) return 0;
+  installBridge(todeCommand());
+  installKeybindings();
+  const server = await ensureServer();
+  const target = resolveTarget(requested, process.cwd());
+  process.stdout.write(`READY ${workbenchUrl(origin(server), target)}\n`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   if (args[0] === "--version" || args[0] === "-v") {
-    let version = "dev";
-    try {
-      version = fs.readFileSync(path.join(INSTALL_ROOT, "VERSION"), "utf8").trim() || "dev";
-    } catch {}
-    process.stdout.write(`${version}\n`);
+    process.stdout.write(`${installedVersion()}\n`);
     return 0;
   }
+  const sshAt = args.indexOf("--ssh");
+  if (sshAt >= 0) {
+    const target = args[sshAt + 1];
+    args.splice(sshAt, 2);
+    return sshCommand(target, args);
+  }
+  if (args[0] === "--serve") return serveCommand(args.slice(1));
   if (args[0] === "--help" || args[0] === "-h") {
     process.stdout.write(HELP);
     return 0;

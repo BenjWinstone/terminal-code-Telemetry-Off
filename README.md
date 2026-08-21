@@ -60,10 +60,23 @@ Your terminal and terminal-code will likely conflict on important shortcuts, mea
 shortcut conflicts you can run `tode --shortcut-setup`, and you will be placed into an interactive wizard that lets you change terminal or terminal-code shortcuts
 so they no longer conflict
 
+
+
 ### How does it work?
 
 terminal-code combines [terminal-browser](https://github.com/zenbu-labs/terminal-browser) (a browser in the terminal) and [code-server](https://github.com/coder/code-server) (VS Code in the browser) to bring VS Code to the terminal. You should look into these projects for more details!
 
+### SSH
+
+The reccomended way to use terminal-code over ssh is running `tode --ssh user@host` on your local machine (where user@host is what you would normally pass to `ssh`).
+
+The alternative is running `tode` directly on the machine you are shh'd into. This will work, but
+requires:
+- every single frame drawn by vscode to be sent over the network
+- all user input to be sent over the network before vscode can react
+- misses out some [extra optimizations](https://sw.kovidgoyal.net/kitty/graphics-protocol/#local-client)
+
+`tode --ssh` improves on this by running only the backend of vscode on the remote machine. The frontend is still running locally on your device, so vscode is able to respond to interactions ~instantly. Any network requests will get proxied over the ssh connection.
 
 ### Windows
 

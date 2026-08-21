@@ -1,8 +1,4 @@
-/**
- * need to look into how we can make the icon stop popping up
- * 
- * i think thats an electron thing
- */
+
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -10,7 +6,7 @@ import path from "node:path";
 
 import { BROWSER_HOME, RUNTIME_DIR, VENDOR_DIR } from "./paths";
 
-export const PINNED_VERSION = "v0.5.8";
+export const PINNED_VERSION = "main-2a739b3";
 
 const RELEASE_ORIGIN = process.env.TODE_RELEASE_ORIGIN ?? "https://terminal-browser.sh/install";
 
@@ -30,16 +26,12 @@ export interface Release {
 
 export type Source = "override" | "vendored" | "pinned" | "cloned" | "downloaded";
 
-/** The platform-arch pair release tables are keyed by, here and on tode's own
- * release worker. One computation, shared by everything that picks a build. */
 export function targetTriple(): string {
   return `${process.platform === "darwin" ? "darwin" : "linux"}-${
     process.arch === "arm64" ? "arm64" : "x64"
   }`;
 }
 
-/** The copy that ships inside the release. A normal install always resolves
- * here, so the first run costs no download and needs no network. */
 const VENDORED = path.join(VENDOR_DIR, "terminal-browser");
 
 export interface Runtime {
