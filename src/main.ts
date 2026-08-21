@@ -15,6 +15,8 @@ import { CODE_SERVER_VERSION, ensureCodeServer, narrateFetch } from "./codeserve
 import { installBridge, requestStartupOpen } from "./bridge";
 import { BOOT_AFTER_APPLY, autoApplyShared, shortcutsCommand } from "./shortcuts/wizard";
 import { importCommand } from "./import/command";
+import { runImport } from "./import/run";
+import type { Editor } from "./import/editors";
 import { runOnboarding } from "./onboarding";
 import { parseGoto, runningWindow, sendToExtension } from "./ipc";
 import type { OpenFile } from "./ipc";
@@ -290,6 +292,47 @@ async function openCommand(args: string[]): Promise<number> {
   );
 }
 
+function importProfile(dir: string): void {
+  const editor: Editor = { name: "this machine", userDir: dir, extensionsDir: null, lastUsed: 0 };
+  const report = runImport(editor);
+  const parts: string[] = [];
+  if (report.settings) parts.push(`${report.settings.imported} settings`);
+  if (report.keybindings) parts.push(`${report.keybindings} keybindings`);
+  if (report.snippets.length) parts.push(`${report.snippets.length} snippet files`);
+  if (report.tasks) parts.push("tasks");
+  if (parts.length) process.stdout.write(`imported ${parts.join(", ")}\n`);
+  installExtensions(path.join(dir, "extensions.txt"));
+}
+
+function installExtensions(listFile: string): void {
+  let ids: string[];
+  try {
+    ids = fs.readFileSync(listFile, "utf8").split("\n").map((line) => line.trim()).filter(Boolean);
+  } catch {
+    return;
+  }
+  const have = new Set(installedExtensions().map((id) => id.toLowerCase()));
+  const missing = ids.filter((entry) => !have.has(entry.split("@")[0].toLowerCase()));
+  if (missing.length === 0) return;
+  process.stdout.write(`installing ${missing.length} extensions\n`);
+  for (const id of missing) {
+    if (extensionCommand(["--install-extension", id], true) !== 0) {
+      process.stderr.write(`  could not install ${id}\n`);
+    }
+  }
+  registerThemeExtension();
+}
+
+function installedExtensions(): string[] {
+  const result = spawnSync(
+    codeServerBin(),
+    ["--list-extensions", "--extensions-dir", EXTENSIONS_DIR, "--user-data-dir", path.join(VSCODE_DIR, "user-data")],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  if (result.status !== 0 || !result.stdout) return [];
+  return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
 function extensionCommand(args: string[], quiet = false): number {
   const result = spawnSync(
     codeServerBin(),
@@ -498,12 +541,14 @@ async function sshCommand(target: string | undefined, args: string[]): Promise<n
 
 async function serveCommand(args: string[]): Promise<number> {
   const paletteFile = takeFlag(args, "--palette");
+  const importDir = takeFlag(args, "--import");
   const prepare = takeBool(args, "--prepare");
   const requested = args.find((arg) => !arg.startsWith("-"));
   await ensureCodeServer(narrateFetch(`code-server ${CODE_SERVER_VERSION}`));
   const palette = paletteFile
     ? (JSON.parse(fs.readFileSync(paletteFile, "utf8")) as TerminalPalette)
     : (await readPalette()).palette;
+  if (importDir) importProfile(importDir);
   ensureFont();
   installTheme(palette);
   installCss(palette);

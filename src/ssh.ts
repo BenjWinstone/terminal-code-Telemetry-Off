@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { writeBrowserScripts } from "./browserglue";
+import { EXTENSIONS_DIR, USER_DIR } from "./profile";
 import { STATE_DIR } from "./runtime/paths";
 import type { Runtime } from "./runtime/release";
 import type { TerminalPalette } from "./terminal/osc";
@@ -73,6 +74,7 @@ function writeBundle(
   write("manifest.json", `${JSON.stringify({ name: "tode" })}\n`);
   write("version", `${version}\n`);
   write("palette.json", `${JSON.stringify(palette)}\n`);
+  stageProfile(dir);
   write(
     "ensure",
     `#!/bin/sh
@@ -97,7 +99,7 @@ fi
     `#!/bin/sh
 set -e
 ./ensure
-"$HOME/.local/bin/tode" --serve --prepare --palette "$(pwd)/palette.json"
+"$HOME/.local/bin/tode" --serve --prepare --palette "$(pwd)/palette.json" --import "$(pwd)/profile"
 `,
     true,
   );
@@ -115,6 +117,38 @@ exec "$HOME/.local/bin/tode" --serve --palette "$here/palette.json"${
     true,
   );
   return dir;
+}
+
+function stageProfile(bundleDir: string): void {
+  const profile = path.join(bundleDir, "profile");
+  fs.mkdirSync(profile, { recursive: true });
+  for (const file of ["settings.json", "keybindings.json", "tasks.json"]) {
+    try {
+      fs.copyFileSync(path.join(USER_DIR, file), path.join(profile, file));
+    } catch {}
+  }
+  try {
+    fs.cpSync(path.join(USER_DIR, "snippets"), path.join(profile, "snippets"), {
+      recursive: true,
+    });
+  } catch {}
+  fs.writeFileSync(path.join(profile, "extensions.txt"), `${extensionIds().join("\n")}\n`);
+}
+
+function extensionIds(): string[] {
+  try {
+    const listed = JSON.parse(fs.readFileSync(path.join(EXTENSIONS_DIR, "extensions.json"), "utf8"));
+    if (!Array.isArray(listed)) return [];
+    return listed
+      .filter((entry) => typeof entry?.identifier?.id === "string")
+      .map((entry) =>
+        typeof entry.version === "string"
+          ? `${entry.identifier.id}@${entry.version}`
+          : entry.identifier.id,
+      );
+  } catch {
+    return [];
+  }
 }
 
 function shellQuote(value: string): string {
