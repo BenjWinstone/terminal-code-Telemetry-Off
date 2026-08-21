@@ -52,6 +52,10 @@ Commands, each as the first argument:
 
 ```
 
+### How does it work?
+
+terminal-code combines [terminal-browser](https://github.com/zenbu-labs/terminal-browser) (a browser in the terminal) and [code-server](https://github.com/coder/code-server) (VS Code in the browser) to bring VS Code to the terminal. You should look into these projects for more details!
+
 
 
 ### Shortcuts
@@ -61,10 +65,6 @@ shortcut conflicts you can run `tode --shortcut-setup`, and you will be placed i
 so they no longer conflict
 
 
-
-### How does it work?
-
-terminal-code combines [terminal-browser](https://github.com/zenbu-labs/terminal-browser) (a browser in the terminal) and [code-server](https://github.com/coder/code-server) (VS Code in the browser) to bring VS Code to the terminal. You should look into these projects for more details!
 
 ### SSH
 
