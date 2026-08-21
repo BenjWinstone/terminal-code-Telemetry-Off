@@ -294,6 +294,7 @@ async function openCommand(args: string[]): Promise<number> {
 
 function importProfile(dir: string): void {
   const editor: Editor = { name: "this machine", userDir: dir, extensionsDir: null, lastUsed: 0 };
+  process.stdout.write("importing settings\n");
   const report = runImport(editor);
   const parts: string[] = [];
   if (report.settings) parts.push(`${report.settings.imported} settings`);
