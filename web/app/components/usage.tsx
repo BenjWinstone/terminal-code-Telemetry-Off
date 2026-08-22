@@ -6,6 +6,7 @@ const LINES = [
   { cmd: "tode", note: "opens the current folder" },
   { cmd: "tode <folder>", note: "opens that folder" },
   { cmd: "tode <file>", note: "opens that file" },
+  { cmd: "tode --ssh <ssh args>", note: "run terminal-code on an ssh server" },
   { cmd: "tode --goto <f:l:c>", note: "opens a file at a line and column" },
   { cmd: "tode --diff <a> <b>", note: "compares two files" },
   { cmd: "tode --split right", note: "opens terminal-code in a terminal split pane to the right" },
