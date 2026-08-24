@@ -11,7 +11,7 @@ https://github.com/user-attachments/assets/4ba0d434-896a-4ab3-9c91-5d351dacee08
 ### Install (macOS & Linux):
 
 ```bash
-curl -fsSl https://tode.sh/install | bash
+curl -fsSL https://tode.sh/install | bash
 ```
 
 ### Usage
