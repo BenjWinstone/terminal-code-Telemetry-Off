@@ -326,7 +326,7 @@ function installExtensions(listFile: string): void {
 function installedExtensions(): string[] {
   const result = spawnSync(
     codeServerBin(),
-    ["--list-extensions", "--extensions-dir", EXTENSIONS_DIR, "--user-data-dir", path.join(VSCODE_DIR, "user-data")],
+    ["--list-extensions", "--extensions-dir", EXTENSIONS_DIR, "--user-data-dir", path.join(VSCODE_DIR, "user-data"), "--disable-telemetry"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
   );
   if (result.status !== 0 || !result.stdout) return [];
@@ -336,7 +336,7 @@ function installedExtensions(): string[] {
 function extensionCommand(args: string[], quiet = false): number {
   const result = spawnSync(
     codeServerBin(),
-    [...args, "--extensions-dir", EXTENSIONS_DIR, "--user-data-dir", path.join(VSCODE_DIR, "user-data")],
+    [...args, "--extensions-dir", EXTENSIONS_DIR, "--user-data-dir", path.join(VSCODE_DIR, "user-data"), "--disable-telemetry"],
     { stdio: quiet ? ["ignore", "inherit", "ignore"] : "inherit" },
   );
   return result.status ?? 1;
